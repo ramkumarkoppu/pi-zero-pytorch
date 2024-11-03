@@ -12,9 +12,24 @@ from x_transformers import (
     Decoder
 )
 
+# helper functions
+
+def exists(v):
+    return v is not None
+
+def default(v, d):
+    return v if exists(v) else d
+
+# main class
+
 class PiZero(Module):
-    def __init__(self):
+    def __init__(
+        self
+    ):
         super().__init__()
 
-    def forward(self, state):
+    def forward(
+        self,
+        state
+    ):
         return actions
