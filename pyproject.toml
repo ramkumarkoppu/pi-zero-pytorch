@@ -25,7 +25,7 @@ classifiers=[
 ]
 
 dependencies = [
-    "autoregressive-diffusion-pytorch>=0.2.7",
+    "autoregressive-diffusion-pytorch>=0.2.8",
     "einops>=0.8.0",
     "torch>=2.0",
     "x-transformers>=1.42.5"
