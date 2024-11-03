@@ -24,7 +24,8 @@ def default(v, d):
 
 class PiZero(Module):
     def __init__(
-        self
+        self,
+        dim
     ):
         super().__init__()
 
@@ -32,4 +33,4 @@ class PiZero(Module):
         self,
         state
     ):
-        return actions
+        return state
