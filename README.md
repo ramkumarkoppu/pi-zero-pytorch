@@ -1,3 +1,5 @@
+<img src="./fig3.png" width="400px"></img>
+
 ## pi-zero-pytorch (wip)
 
 Implementation of <a href="https://www.physicalintelligence.company/blog/pi0">π0</a> the robotic foundation model architecture proposed by Physical Intelligence

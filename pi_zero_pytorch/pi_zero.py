@@ -4,8 +4,8 @@ import torch.nn.functional as F
 
 from einops import rearrange
 
-from autoregressive_diffusion_pytorch import (
-    AutoregressiveFlow
+from transfusion_pytorch import (
+    Transfusion
 )
 
 from x_transformers import (
