@@ -244,11 +244,20 @@ class PiZero(Module):
         tokens = self.token_emb(token_ids)
 
         if exists(self.vit):
-            assert images.ndim == 4
+            assert images.ndim in {4, 5}
+            is_multiple_images = images.ndim == 5
+
+            if is_multiple_images:
+                images, images_frames_packed_shape = pack([images], '* c h w')
 
             with torch.no_grad():
                 self.vit.eval()
                 visual_tokens = self.vit(images)
+
+            if is_multiple_images:
+                visual_tokens = unpack(visual_tokens, images_frames_packed_shape, '* n d')
+                visual_tokens = rearrange(visual_tokens, 'b f n d -> b (f n) d')
+
         else:
             assert images.ndim == 3, 'images must be already encoded as (batch, seq, feature dimension)'
             visual_tokens = images
