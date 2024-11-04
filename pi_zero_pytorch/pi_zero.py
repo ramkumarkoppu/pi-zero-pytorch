@@ -17,9 +17,20 @@ from einops import rearrange, repeat, einsum, pack, unpack
 
 # constants
 
+LinearNoBias = partial(nn.Linear, bias = False)
+
+# flex attention related
+# https://pytorch.org/blog/flexattention/
+
 flex_attention = torch.compile(flex_attention)
 
-LinearNoBias = partial(nn.Linear, bias = False)
+def softclamp_score_mod(value):
+    def inner(score, b, h, q_idx, kv_idx):
+        score = score / value
+        score = torch.tanh(score)
+        score = score * value
+        return score
+    return inner
 
 # helper functions
 
