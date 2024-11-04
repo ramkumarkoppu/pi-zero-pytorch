@@ -196,6 +196,8 @@ class PiZero(Module):
         vit: Module | None = None,
         attn_kwargs: dict = dict(),
         ff_kwargs: dict = dict(),
+        lm_loss_weight = 1.,
+        flow_loss_weight = 1.
     ):
         super().__init__()
         dim_time_cond = default(dim_time_cond, dim * 2)
@@ -232,6 +234,11 @@ class PiZero(Module):
         self.state_to_logits = LinearNoBias(dim, num_tokens)
         self.actions_to_pred_flow = LinearNoBias(dim, dim_action_input)
 
+        # loss related
+
+        self.lm_loss_weight = lm_loss_weight
+        self.flow_loss_weight = flow_loss_weight
+
     def forward(
         self,
         images,    # vision
@@ -255,6 +262,8 @@ class PiZero(Module):
         action_tokens = self.to_action_tokens(noised_actions)
 
         # language
+
+        labels = token_ids[:, 1:]
 
         tokens = self.token_emb(token_ids)
 
@@ -285,7 +294,10 @@ class PiZero(Module):
 
         # transformer
 
-        for (attn, state_ff, actions_ff), (actions_ada_rmsnorm, actions_ada_layerscale) in zip(self.layers, self.cond_layers):
+        for (
+            (attn, state_ff, actions_ff),
+            (actions_ada_rmsnorm, actions_ada_layerscale)
+        ) in zip(self.layers, self.cond_layers):
 
             state_out, actions_out = attn(state_tokens, action_tokens)
 
@@ -306,9 +318,19 @@ class PiZero(Module):
 
         pred_actions_flow = self.actions_to_pred_flow(actions)
 
+        language_loss = F.cross_entropy(
+            rearrange(language_logits[:, :-1], 'b n l -> b l n'),
+            labels
+        )
+
         flow_loss = F.mse_loss(flow, pred_actions_flow)
 
-        return language_logits, flow_loss
+        total_loss = (
+            language_loss * self.lm_loss_weight,
+            flow_loss * self.flow_loss_weight
+        )
+
+        return total_loss, (language_loss, flow_loss)
 
 # fun
 
