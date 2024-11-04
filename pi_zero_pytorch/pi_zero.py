@@ -11,10 +11,6 @@ from einops.layers.torch import Rearrange
 
 from einops import rearrange, repeat, einsum, pack, unpack
 
-from x_transformers import (
-    Decoder
-)
-
 # constants
 
 flex_attention = torch.compile(flex_attention)
