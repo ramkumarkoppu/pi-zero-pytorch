@@ -253,6 +253,7 @@ class PiZero(Module):
         dim,
         num_tokens,
         dim_action_input,
+        dim_joint_state,
         dim_time_cond = None,
         depth = 12,
         dim_head = 64,
@@ -288,6 +289,8 @@ class PiZero(Module):
         # embedding
 
         self.token_emb = nn.Embedding(num_tokens, dim)
+
+        self.to_joint_state_tokens = nn.Linear(dim_joint_state, dim)
 
         self.to_action_tokens = nn.Linear(dim_action_input, dim)
 
@@ -346,6 +349,7 @@ class PiZero(Module):
         self,
         images,
         token_ids,
+        joint_state,
         trajectory_length
     ):
         raise NotImplementedError
@@ -354,6 +358,7 @@ class PiZero(Module):
         self,
         images,            # vision
         token_ids,         # language
+        joint_state,       # joint state
         actions  = None,   # action,
         **kwargs
     ):
@@ -382,7 +387,7 @@ class PiZero(Module):
 
         labels = token_ids[:, 1:]
 
-        tokens = self.token_emb(token_ids)
+        language_tokens = self.token_emb(token_ids)
 
         # vision
 
@@ -405,9 +410,13 @@ class PiZero(Module):
             assert images.ndim == 3, 'images must be already encoded as (batch, seq, feature dimension)'
             visual_tokens = images
 
+        # joint state
+
+        joint_state_tokens = self.to_joint_state_tokens(joint_state)
+
         # concat visual rep with language
 
-        state_tokens, packed_shape = pack([visual_tokens, tokens], 'b * d')
+        state_tokens, packed_shape = pack([visual_tokens, language_tokens, joint_state_tokens], 'b * d')
 
         # prepare maybe flex attention
 
@@ -465,7 +474,7 @@ class PiZero(Module):
 
         # unpack and unembed to predictions
 
-        visual_tokens, tokens = unpack(state_tokens, packed_shape, 'b * d')
+        visual_tokens, tokens, _ = unpack(state_tokens, packed_shape, 'b * d')
 
         # gemma uses a final softclamp before norm
 
