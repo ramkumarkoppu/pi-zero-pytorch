@@ -39,12 +39,16 @@ def create_pizero_attn_mask(prefix_causal_length):
     return inner
 
 def softclamp_score_mod(value):
-    def inner(score, b, h, q_idx, kv_idx):
+    def identity(score, b, h, q, k):
+        return score
+
+    def softclamped(score, b, h, q, k):
         score = score / value
         score = torch.tanh(score)
         score = score * value
         return score
-    return inner
+
+    return softclamped if value > 0. else identity
 
 # helper functions
 
@@ -55,6 +59,9 @@ def default(v, d):
     return v if exists(v) else d
 
 def softclamp(t, value):
+    if value <= 0.:
+        return t
+
     return (t / value).tanh() * value
 
 # attention
@@ -235,8 +242,8 @@ class PiZero(Module):
         dim_head = 64,
         heads = 8,
         use_flex_attn = False,
-        attn_softclamp_value = 50.,
         ff_expand_factor = 4.,
+        attn_softclamp_value = 50.,
         final_norm_softclamp_value = 30.,
         vit: Module | None = None,
         attn_kwargs: dict = dict(),
@@ -300,7 +307,7 @@ class PiZero(Module):
         self.layers = ModuleList(layers)
         self.cond_layers = ModuleList(cond_layers)
 
-        self.final_norm_softclamp = partial(softclamp, final_norm_softclamp_value)
+        self.final_norm_softclamp = partial(softclamp, value = final_norm_softclamp_value)
 
         self.final_norm = nn.RMSNorm(dim)
         self.final_actions_norm = nn.RMSNorm(dim)
