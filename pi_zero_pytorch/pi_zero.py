@@ -42,6 +42,9 @@ class Attention(Module):
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
 
+        self.rmsnorm = nn.RMSNorm(dim)
+        self.actions_rmsnorm = nn.RMSNorm(dim)
+
         self.to_qkv = LinearNoBias(dim, 3 * dim_inner)
         self.to_out = LinearNoBias(dim_inner, dim)
 
@@ -54,6 +57,9 @@ class Attention(Module):
         actions
     ):
         seq_len, device = multimodal_seq.shape[-2], multimodal_seq.device
+
+        multimodal_seq = self.rmsnorm(multimodal_seq)
+        actions = self.actions_rmsnorm(actions)
 
         # separate projections for multimodal seq vs actions
 
@@ -87,17 +93,71 @@ class Attention(Module):
 
         return self.to_out(mout), self.to_actions_out(aout)
 
+# attention
+
+class SwiGLUFeedForward(Module):
+    def __init__(
+        self,
+        dim,
+        expand_factor = 4.,
+        dim_inner = None
+    ):
+        super().__init__()
+        dim_inner = default(dim_inner, int(dim * expand_factor * 2 / 3))
+
+        self.rmsnorm = nn.RMSNorm(dim)
+        self.proj_in = LinearNoBias(dim, dim_inner)
+        self.proj_out = LinearNoBias(dim_inner, dim)
+
+    def forward(
+        self,
+        seq
+    ):
+        seq = self.rmsnorm(seq)
+        seq, gates = self.proj_in(seq).chunk(2, dim = -1)
+        seq = seq * F.gelu(gates)
+        return self.proj_out(seq)
+
 # main class
 
 class PiZero(Module):
     def __init__(
         self,
-        dim
+        dim,
+        depth = 12,
+        dim_head = 64,
+        heads = 8,
+        ff_expand_factor = 4.
     ):
         super().__init__()
 
+        layers = []
+
+        for _ in range(depth):
+            layers.append(ModuleList([
+                Attention(dim = dim, dim_head = dim_head, heads = heads),
+                SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor),
+                SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor)
+            ]))
+
+        self.layers = ModuleList(layers)
+
     def forward(
         self,
-        state
+        state,
+        actions
     ):
-        return state
+
+        # transformer
+
+        for attn, state_ff, actions_ff in self.layers:
+
+            state_out, actions_out = attn(state, actions)
+
+            state = state + state_out
+            actions = actions + actions_out
+
+            state = state_ff(ff) + ff
+            actions = actions_ff(actions) + actions
+
+        return state, actions
