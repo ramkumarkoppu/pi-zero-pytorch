@@ -7,8 +7,8 @@ from torch import nn, tensor, is_tensor
 from torch.nn import Module, ModuleList
 from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 
+import einx
 from einops.layers.torch import Rearrange
-
 from einops import rearrange, repeat, einsum, pack, unpack
 
 # constants
@@ -50,21 +50,42 @@ class Attention(Module):
 
     def forward(
         self,
-        seq,
+        multimodal_seq,
         actions
     ):
-        q, k, v = self.to_qkv(seq).chunk(3, dim = -1)
-        q, k, v = tuple(self.split_heads(t) for t in (q, k, v))
+        seq_len, device = multimodal_seq.shape[-2], multimodal_seq.device
+
+        # separate projections for multimodal seq vs actions
+
+        mq, mk, mv = self.to_qkv(multimodal_seq).chunk(3, dim = -1)
+
+        aq, ak, av = self.to_actions_qkv(actions).chunk(3, dim = -1)
+
+        mq, mk, mv, aq, ak, av = tuple(self.split_heads(t) for t in (mq, mk, mv, aq, ak, av))
+
+        q, k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mq, mk, mv), (aq, ak, v)))
+
+        # attention
 
         q = q * self.scale
 
         sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
+
+        causal_mask = torch.ones(sim.shape[-2], dtype = torch.bool, device = device).triu(1)
+
+        sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
+
         attn = sim.softmax(dim = -1)
 
         out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
 
         out = self.merge_heads(out)
-        return self.to_out(out)
+
+        # separate projections for multimodal seq vs actions
+
+        mout, aout = out[:, :seq_len], out[:, seq_len:]
+
+        return self.to_out(mout), self.to_actions_out(aout)
 
 # main class
 
