@@ -267,13 +267,13 @@ class PiZero(Module):
 
         visual_tokens, tokens = unpack(state, packed_shape, 'b * d')
 
-        state = self.final_norm(state)
+        tokens = self.final_norm(tokens)
         actions = self.final_actions_norm(actions)
 
-        state_logits = self.state_to_logits(state)
+        language_logits = self.state_to_logits(tokens)
         denoised_actions = self.actions_to_denoised_pred(actions)
 
-        return state_logits, denoised_actions
+        return language_logits, denoised_actions
 
 # fun
 
