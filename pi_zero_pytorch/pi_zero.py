@@ -98,6 +98,8 @@ class Attention(Module):
         self,
         multimodal_seq,
         actions,
+        actions_value_residual = None,
+        return_values = False,
         flex_attn_fn: callable | None = None
     ):
         is_cuda, seq_len, device = multimodal_seq.is_cuda, multimodal_seq.shape[-2], multimodal_seq.device
@@ -112,6 +114,9 @@ class Attention(Module):
         aq, ak, av = self.to_actions_qkv(actions).chunk(3, dim = -1)
 
         mq, mk, mv, aq, ak, av = tuple(self.split_heads(t) for t in (mq, mk, mv, aq, ak, av))
+
+        if exists(actions_value_residual):
+            av = 0.5 * (av + actions_value_residual)
 
         q, k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mq, mk, mv), (aq, ak, av)))
 
@@ -145,7 +150,12 @@ class Attention(Module):
 
         mout, aout = out[:, :seq_len], out[:, seq_len:]
 
-        return self.to_out(mout), self.to_actions_out(aout)
+        output =  self.to_out(mout), self.to_actions_out(aout)
+
+        if not return_values:
+            return output
+
+        return output, av
 
 # attention
 
@@ -417,6 +427,10 @@ class PiZero(Module):
                 score_mod = score_mod
             )
 
+        # value residual learning
+
+        actions_value_residual = None
+
         # transformer
 
         for (
@@ -426,7 +440,9 @@ class PiZero(Module):
 
             action_tokens = attn_ada_rmsnorm(action_tokens, time_cond)
 
-            state_out, actions_out = attn(state_tokens, action_tokens, flex_attn_fn = flex_attn_fn)
+            (state_out, actions_out), action_values = attn(state_tokens, action_tokens, flex_attn_fn = flex_attn_fn, actions_value_residual = actions_value_residual, return_values = True)
+
+            actions_value_residual = default(actions_value_residual, action_values)
 
             action_tokens = attn_ada_layerscale(action_tokens, time_cond)
 
@@ -471,7 +487,7 @@ class PiZero(Module):
         # total loss and return breakdown
 
         total_loss = (
-            language_loss * self.lm_loss_weight,
+            language_loss * self.lm_loss_weight +
             flow_loss * self.flow_loss_weight
         )
 

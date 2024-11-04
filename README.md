@@ -28,7 +28,7 @@ vision = torch.randn(1, 1024, 512)
 actions = torch.randn(1, 32, 6)
 commands = torch.randint(0, 20_000, (1, 1024))
 
-loss = model(vision, commands, actions)
+loss, _ = model(vision, commands, actions)
 loss.backward()
 
 # after much training
@@ -42,5 +42,14 @@ actions = model(vision, commands, trajectory_length = 32)
 @misc{Black2024,
     author  = {Kevin Black, Noah Brown, Danny Driess, Adnan Esmail, Michael Equi, Chelsea Finn, Niccolo Fusai, Lachy Groom, Karol Hausman, Brian Ichter, Szymon Jakubczak, Tim Jones, Liyiming Ke, Sergey Levine, Adrian Li-Bell, Mohith Mothukuri, Suraj Nair, Karl Pertsch, Lucy Xiaoyang Shi, James Tanner, Quan Vuong, Anna Walling, Haohuan Wang, Ury Zhilinsky},
     url     = {https://www.physicalintelligence.company/download/pi0.pdf}
+}
+```
+
+```bibtex
+@inproceedings{Zhou2024ValueRL,
+    title   = {Value Residual Learning For Alleviating Attention Concentration In Transformers},
+    author  = {Zhanchao Zhou and Tianyi Wu and Zhiyun Jiang and Zhenzhong Lan},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273532030}
 }
 ```
