@@ -102,6 +102,8 @@ class Attention(Module):
 
         causal_mask = torch.ones(sim.shape[-2:], dtype = torch.bool, device = device).triu(1)
 
+        causal_mask[..., seq_len:] = False  # actions have bidirectional attention, lining up with Transfusion paper
+
         sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
 
         attn = sim.softmax(dim = -1)
