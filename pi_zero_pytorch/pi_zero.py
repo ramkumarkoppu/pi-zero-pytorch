@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, tensor, is_tensor
 from torch.nn import Module, ModuleList
+from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 
 from einops.layers.torch import Rearrange
 
@@ -15,6 +16,8 @@ from x_transformers import (
 )
 
 # constants
+
+flex_attention = torch.compile(flex_attention)
 
 LinearNoBias = partial(nn.Linear, bias = False)
 
@@ -65,7 +68,7 @@ class Attention(Module):
         out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
 
         out = self.merge_heads(out)
-        return out
+        return self.to_out(out)
 
 # main class
 
