@@ -193,7 +193,9 @@ class PiZero(Module):
         dim_head = 64,
         heads = 8,
         ff_expand_factor = 4.,
-        vit: Module | None = None
+        vit: Module | None = None,
+        attn_kwargs: dict = dict(),
+        ff_kwargs: dict = dict(),
     ):
         super().__init__()
         dim_time_cond = default(dim_time_cond, dim * 2)
@@ -202,6 +204,8 @@ class PiZero(Module):
 
         self.token_emb = nn.Embedding(num_tokens, dim)
 
+        self.to_action_tokens = nn.Linear(dim_action_input, dim)
+
         self.rotary_emb = RotaryEmbedding(dim_head)
 
         layers = []
@@ -209,9 +213,9 @@ class PiZero(Module):
 
         for _ in range(depth):
             layers.append(ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads),
-                SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor),
-                SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor)
+                Attention(dim = dim, dim_head = dim_head, heads = heads, **attn_kwargs),
+                SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
+                SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
             ]))
 
             cond_layers.append(ModuleList([
@@ -232,8 +236,10 @@ class PiZero(Module):
         self,
         images,    # vision
         token_ids, # language
-        actions    # action,
+        actions,   # action
     ):
+
+        action_tokens = self.to_action_tokens(actions)
 
         tokens = self.token_emb(token_ids)
 
@@ -244,31 +250,31 @@ class PiZero(Module):
                 self.vit.eval()
                 visual_tokens = self.vit(images)
         else:
-            assert images.ndim == 3, 'images must be already encoded'
+            assert images.ndim == 3, 'images must be already encoded as (batch, seq, feature dimension)'
             visual_tokens = images
 
         # concat visual rep with language
 
-        state, packed_shape = pack([visual_tokens, tokens], 'b * d')
+        state_tokens, packed_shape = pack([visual_tokens, tokens], 'b * d')
 
         # transformer
 
         for (attn, state_ff, actions_ff), (actions_ada_rmsnorm, actions_ada_layerscale) in zip(self.layers, self.cond_layers):
 
-            state_out, actions_out = attn(state, actions)
+            state_out, actions_out = attn(state_tokens, action_tokens)
 
-            state = state + state_out
-            actions = actions + actions_out
+            state_tokens = state_tokens + state_out
+            action_tokens = action_tokens + actions_out
 
-            state = state_ff(state) + state
-            actions = actions_ff(actions) + actions
+            state_tokens = state_ff(state_tokens) + state_tokens
+            action_tokens = actions_ff(action_tokens) + action_tokens
 
         # unpack and unembed to predictions
 
-        visual_tokens, tokens = unpack(state, packed_shape, 'b * d')
+        visual_tokens, tokens = unpack(state_tokens, packed_shape, 'b * d')
 
         tokens = self.final_norm(tokens)
-        actions = self.final_actions_norm(actions)
+        actions = self.final_actions_norm(action_tokens)
 
         language_logits = self.state_to_logits(tokens)
         denoised_actions = self.actions_to_denoised_pred(actions)
