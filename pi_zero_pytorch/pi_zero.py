@@ -124,12 +124,19 @@ class PiZero(Module):
     def __init__(
         self,
         dim,
+        num_tokens,
+        dim_action_input,
         depth = 12,
         dim_head = 64,
         heads = 8,
-        ff_expand_factor = 4.
+        ff_expand_factor = 4.,
+        vit: Module | None = None
     ):
         super().__init__()
+
+        self.vit = vit
+
+        self.token_emb = nn.Embedding(num_tokens, dim)
 
         layers = []
 
@@ -142,11 +149,34 @@ class PiZero(Module):
 
         self.layers = ModuleList(layers)
 
+        self.final_norm = nn.RMSNorm(dim)
+        self.final_actions_norm = nn.RMSNorm(dim)
+
+        self.state_to_logits = LinearNoBias(dim, num_tokens)
+        self.actions_to_denoised_pred = LinearNoBias(dim, dim_action_input)
+
     def forward(
         self,
-        state,
-        actions
+        images,    # vision
+        token_ids, # language
+        actions    # action
     ):
+
+        tokens = self.token_emb(token_ids)
+
+        if exists(self.vit):
+            assert images.ndim == 4
+
+            with torch.no_grad():
+                self.vit.eval()
+                visual_tokens = self.vit(images)
+        else:
+            assert images.ndim == 3, 'images must be already encoded'
+            visual_tokens = images
+
+        # concat visual rep with language
+
+        state, packed_shape = pack([visual_tokens, tokens], 'b * d')
 
         # transformer
 
@@ -160,7 +190,17 @@ class PiZero(Module):
             state = state_ff(state) + state
             actions = actions_ff(actions) + actions
 
-        return state, actions
+        # unpack and unembed to predictions
+
+        visual_tokens, tokens = unpack(state, packed_shape, 'b * d')
+
+        state = self.final_norm(state)
+        actions = self.final_actions_norm(actions)
+
+        state_logits = self.state_to_logits(state)
+        denoised_actions = self.actions_to_denoised_pred(actions)
+
+        return state_logits, denoised_actions
 
 # fun
 
