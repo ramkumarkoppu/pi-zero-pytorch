@@ -29,6 +29,9 @@ def exists(v):
 def default(v, d):
     return v if exists(v) else d
 
+def softclamp(t, value):
+    return (t / value).tanh() * value
+
 # attention
 
 class Attention(Module):
@@ -37,7 +40,8 @@ class Attention(Module):
         dim,
         dim_head = 64,
         heads = 8,
-        dropout = 0.
+        dropout = 0.,
+        softclamp_value = 50.,
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -54,6 +58,8 @@ class Attention(Module):
 
         self.to_actions_qkv = LinearNoBias(dim, 3 * dim_inner)
         self.to_actions_out = LinearNoBias(dim_inner, dim)
+
+        self.softclamp_value = softclamp_value
 
     def forward(
         self,
@@ -80,6 +86,8 @@ class Attention(Module):
         q = q * self.scale
 
         sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
+
+        sim = softclamp(sim, self.softclamp_value)
 
         causal_mask = torch.ones(sim.shape[-2:], dtype = torch.bool, device = device).triu(1)
 
