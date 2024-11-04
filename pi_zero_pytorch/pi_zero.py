@@ -235,6 +235,7 @@ class PiZero(Module):
         dim_head = 64,
         heads = 8,
         use_flex_attn = False,
+        attn_softclamp_value = 50.,
         ff_expand_factor = 4.,
         final_norm_softclamp_value = 30.,
         vit: Module | None = None,
@@ -249,11 +250,19 @@ class PiZero(Module):
         ),
     ):
         super().__init__()
-        assert not (use_flex_attn and not exists(flex_attention)), 'flex attention cannot be used'
-
         dim_time_cond = default(dim_time_cond, dim * 2)
 
+        # flex attention related
+
+        assert not (use_flex_attn and not exists(flex_attention)), 'flex attention cannot be used'
+        self.use_flex_attn = use_flex_attn
+        self.attn_softclamp_value = attn_softclamp_value
+
+        # vit
+
         self.vit = vit
+
+        # embedding
 
         self.token_emb = nn.Embedding(num_tokens, dim)
 
@@ -265,8 +274,11 @@ class PiZero(Module):
             nn.SiLU(),
         )
 
-        self.use_flex_attn = use_flex_attn
+        # positional embedding
+
         self.rotary_emb = RotaryEmbedding(dim_head)
+
+        # attention and feedforward
 
         layers = []
         cond_layers = []
@@ -293,6 +305,8 @@ class PiZero(Module):
         self.final_norm = nn.RMSNorm(dim)
         self.final_actions_norm = nn.RMSNorm(dim)
 
+        # unembedding
+
         self.state_to_logits = LinearNoBias(dim, num_tokens)
         self.actions_to_pred_flow = LinearNoBias(dim, dim_action_input)
 
@@ -300,6 +314,10 @@ class PiZero(Module):
 
         self.lm_loss_weight = lm_loss_weight
         self.flow_loss_weight = flow_loss_weight
+
+        # sampling related
+
+        self.odeint_fn = partial(odeint, **odeint_kwargs)
 
     def sample(
         self,
