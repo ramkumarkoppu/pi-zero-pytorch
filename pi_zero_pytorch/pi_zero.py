@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 from torch import pi, nn, tensor, is_tensor
 from torch.nn import Module, ModuleList
-from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 
 from torchdiffeq import odeint
 
@@ -22,7 +21,22 @@ LinearNoBias = partial(nn.Linear, bias = False)
 # flex attention related
 # https://pytorch.org/blog/flexattention/
 
-flex_attention = torch.compile(flex_attention)
+flex_attention = None
+
+if torch.cuda.is_available():
+    from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+    flex_attention = torch.compile(flex_attention)
+
+def create_pizero_attn_mask(prefix_causal_length):
+    # the pi-zero attention is a triangular causal mask, but bidirectional attention for the actions at the very right hand side
+
+    def inner(batch_index, head_index, query_index, key_index):
+        return (
+            query_index >= key_index and        # causal
+            key_index >= prefix_causal_length   # bidirectional
+        )
+
+    return inner
 
 def softclamp_score_mod(value):
     def inner(score, b, h, q_idx, kv_idx):
@@ -52,6 +66,7 @@ class Attention(Module):
         dim_head = 64,
         heads = 8,
         dropout = 0.,
+        use_flex_attn = False,
         softclamp_value = 50.,
     ):
         super().__init__()
@@ -75,9 +90,10 @@ class Attention(Module):
     def forward(
         self,
         multimodal_seq,
-        actions
+        actions,
+        flex_attn_fn: callable | None = None
     ):
-        seq_len, device = multimodal_seq.shape[-2], multimodal_seq.device
+        is_cuda, seq_len, device = multimodal_seq.is_cuda, multimodal_seq.shape[-2], multimodal_seq.device
 
         multimodal_seq = self.rmsnorm(multimodal_seq)
         actions = self.actions_rmsnorm(actions)
@@ -92,23 +108,29 @@ class Attention(Module):
 
         q, k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mq, mk, mv), (aq, ak, av)))
 
-        # attention
+        if exists(flex_attn_fn):
+            out = flex_attn_fn(q, k, v)
 
-        q = q * self.scale
+        else:
+            # attention
 
-        sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
+            q = q * self.scale
 
-        sim = softclamp(sim, self.softclamp_value)
+            sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
 
-        causal_mask = torch.ones(sim.shape[-2:], dtype = torch.bool, device = device).triu(1)
+            sim = softclamp(sim, self.softclamp_value)
 
-        causal_mask[..., seq_len:] = False  # actions have bidirectional attention, lining up with Transfusion paper
+            causal_mask = torch.ones(sim.shape[-2:], dtype = torch.bool, device = device).triu(1)
 
-        sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
+            causal_mask[..., seq_len:] = False  # actions have bidirectional attention, lining up with Transfusion paper
 
-        attn = sim.softmax(dim = -1)
+            sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
 
-        out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
+            attn = sim.softmax(dim = -1)
+
+            out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
+
+        # merge attention heads
 
         out = self.merge_heads(out)
 
@@ -212,6 +234,7 @@ class PiZero(Module):
         depth = 12,
         dim_head = 64,
         heads = 8,
+        use_flex_attn = False,
         ff_expand_factor = 4.,
         final_norm_softclamp_value = 30.,
         vit: Module | None = None,
@@ -226,6 +249,8 @@ class PiZero(Module):
         ),
     ):
         super().__init__()
+        assert not (use_flex_attn and not exists(flex_attention)), 'flex attention cannot be used'
+
         dim_time_cond = default(dim_time_cond, dim * 2)
 
         self.vit = vit
@@ -240,6 +265,7 @@ class PiZero(Module):
             nn.SiLU(),
         )
 
+        self.use_flex_attn = use_flex_attn
         self.rotary_emb = RotaryEmbedding(dim_head)
 
         layers = []
@@ -247,7 +273,7 @@ class PiZero(Module):
 
         for _ in range(depth):
             layers.append(ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, **attn_kwargs),
+                Attention(dim = dim, dim_head = dim_head, heads = heads, use_flex_attn = use_flex_attn, **attn_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
             ]))
@@ -342,6 +368,30 @@ class PiZero(Module):
 
         state_tokens, packed_shape = pack([visual_tokens, tokens], 'b * d')
 
+        # prepare maybe flex attention
+
+        flex_attn_fn = None
+
+        if self.use_flex_attn and state_tokens.is_cuda:
+
+            prefix_length = state_tokens.shape[-2]
+            seq_len = prefix_length + action_tokens.shape[-2]
+
+            block_mask = create_block_mask(
+                create_pizero_attn_mask(prefix_length),
+                Q_LEN = seq_len,
+                KV_LEN = seq_len,
+                device = state_tokens.device
+            )
+
+            score_mod_fn = softclamp_score_mod(self.attn_softclamp_value)
+
+            flex_attn_fn = partial(
+                flex_attention,
+                block_mask = block_mask,
+                score_mod = score_mod
+            )
+
         # transformer
 
         for (
@@ -351,7 +401,7 @@ class PiZero(Module):
 
             action_tokens = attn_ada_rmsnorm(action_tokens, time_cond)
 
-            state_out, actions_out = attn(state_tokens, action_tokens)
+            state_out, actions_out = attn(state_tokens, action_tokens, flex_attn_fn = flex_attn_fn)
 
             action_tokens = attn_ada_layerscale(action_tokens, time_cond)
 
