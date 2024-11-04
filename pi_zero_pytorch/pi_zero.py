@@ -230,7 +230,7 @@ class PiZero(Module):
         self.final_actions_norm = nn.RMSNorm(dim)
 
         self.state_to_logits = LinearNoBias(dim, num_tokens)
-        self.actions_to_denoised_pred = LinearNoBias(dim, dim_action_input)
+        self.actions_to_pred_flow = LinearNoBias(dim, dim_action_input)
 
     def forward(
         self,
@@ -238,10 +238,27 @@ class PiZero(Module):
         token_ids, # language
         actions,   # action
     ):
+        batch, device = token_ids.shape[0], token_ids.device
 
-        action_tokens = self.to_action_tokens(actions)
+        # noising the action for flow matching
+
+        times = torch.rand((batch,), device = device)
+        noise = torch.randn_like(actions)
+
+        flow = actions - noise
+        padded_times = rearrange(times, 'b -> b 1 1')
+
+        noised_actions = noise * (1. - padded_times) + padded_times * actions
+
+        # actions
+
+        action_tokens = self.to_action_tokens(noised_actions)
+
+        # language
 
         tokens = self.token_emb(token_ids)
+
+        # vision
 
         if exists(self.vit):
             assert images.ndim in {4, 5}
@@ -286,9 +303,12 @@ class PiZero(Module):
         actions = self.final_actions_norm(action_tokens)
 
         language_logits = self.state_to_logits(tokens)
-        denoised_actions = self.actions_to_denoised_pred(actions)
 
-        return language_logits, denoised_actions
+        pred_actions_flow = self.actions_to_pred_flow(actions)
+
+        flow_loss = F.mse_loss(flow, pred_actions_flow)
+
+        return language_logits, flow_loss
 
 # fun
 
