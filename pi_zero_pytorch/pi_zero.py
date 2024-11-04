@@ -73,12 +73,14 @@ class Attention(Module):
         dim_head = 64,
         heads = 8,
         dropout = 0.,
-        use_flex_attn = False,
         softclamp_value = 50.,
+        rotary_emb: RotaryEmbedding | None = None
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
         dim_inner = dim_head * heads
+
+        self.rotary_emb = rotary_emb
 
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
@@ -102,7 +104,7 @@ class Attention(Module):
         return_values = False,
         flex_attn_fn: callable | None = None
     ):
-        is_cuda, seq_len, device = multimodal_seq.is_cuda, multimodal_seq.shape[-2], multimodal_seq.device
+        seq_len, device = multimodal_seq.shape[-2], multimodal_seq.device
 
         multimodal_seq = self.rmsnorm(multimodal_seq)
         actions = self.actions_rmsnorm(actions)
@@ -119,6 +121,10 @@ class Attention(Module):
             av = 0.5 * (av + actions_value_residual)
 
         q, k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mq, mk, mv), (aq, ak, av)))
+
+        if exists(self.rotary_emb):
+            q = self.rotary_emb.rotate_queries_or_keys(q)
+            k = self.rotary_emb.rotate_queries_or_keys(k)
 
         if exists(flex_attn_fn):
             out = flex_attn_fn(q, k, v)
@@ -302,7 +308,7 @@ class PiZero(Module):
 
         for _ in range(depth):
             layers.append(ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, use_flex_attn = use_flex_attn, **attn_kwargs),
+                Attention(dim = dim, dim_head = dim_head, heads = heads, rotary_emb = self.rotary_emb, **attn_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
             ]))
