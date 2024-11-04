@@ -3,9 +3,11 @@ from functools import partial
 
 import torch
 import torch.nn.functional as F
-from torch import nn, tensor, is_tensor
+from torch import pi, nn, tensor, is_tensor
 from torch.nn import Module, ModuleList
 from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+
+from torchdiffeq import odeint
 
 from rotary_embedding_torch import RotaryEmbedding
 
@@ -154,12 +156,9 @@ class AdaptiveRMSNorm(Module):
         self.to_beta = LinearNoBias(dim_cond, dim)
 
     def forward(self, actions, cond):
-
         normed = self.norm(actions)
-        normed_cond = self.norm_cond(cond)
-
-        gamma = self.to_gamma(normed_cond)
-        beta = self.to_beta(normed_cond)
+        gamma = self.to_gamma(cond)
+        beta = self.to_beta(cond)
         return normed * gamma + beta
 
 class AdaptiveLayerscale(Module):
@@ -176,9 +175,9 @@ class AdaptiveLayerscale(Module):
 
         self.to_adaln_zero_gamma = adaln_zero_gamma_linear
 
-    def forward(self, actions, *, cond):
+    def forward(self, actions, cond):
         gamma = self.to_adaln_zero_gamma(cond)
-        return out * gamma.sigmoid()
+        return actions * gamma.sigmoid()
 
 # main class
 
@@ -197,7 +196,12 @@ class PiZero(Module):
         attn_kwargs: dict = dict(),
         ff_kwargs: dict = dict(),
         lm_loss_weight = 1.,
-        flow_loss_weight = 1.
+        flow_loss_weight = 1.,
+        odeint_kwargs: dict = dict(
+            atol = 1e-5,
+            rtol = 1e-5,
+            method = 'midpoint'
+        ),
     ):
         super().__init__()
         dim_time_cond = default(dim_time_cond, dim * 2)
@@ -207,6 +211,12 @@ class PiZero(Module):
         self.token_emb = nn.Embedding(num_tokens, dim)
 
         self.to_action_tokens = nn.Linear(dim_action_input, dim)
+
+        self.to_time_cond = nn.Sequential(
+            RandomFourierEmbed(dim),
+            nn.Linear(dim, dim_time_cond),
+            nn.SiLU(),
+        )
 
         self.rotary_emb = RotaryEmbedding(dim_head)
 
@@ -221,6 +231,8 @@ class PiZero(Module):
             ]))
 
             cond_layers.append(ModuleList([
+                AdaptiveRMSNorm(dim, dim_time_cond),
+                AdaptiveLayerscale(dim, dim_time_cond),
                 AdaptiveRMSNorm(dim, dim_time_cond),
                 AdaptiveLayerscale(dim, dim_time_cond)
             ]))
@@ -239,12 +251,25 @@ class PiZero(Module):
         self.lm_loss_weight = lm_loss_weight
         self.flow_loss_weight = flow_loss_weight
 
+    def sample(
+        self,
+        images,
+        token_ids,
+        trajectory_length
+    ):
+        raise NotImplementedError
+
     def forward(
         self,
-        images,    # vision
-        token_ids, # language
-        actions,   # action
+        images,            # vision
+        token_ids,         # language
+        actions  = None,   # action,
+        **kwargs
     ):
+
+        if not exists(actions):
+            return self.sample(images, token_ids, **kwargs)
+
         batch, device = token_ids.shape[0], token_ids.device
 
         # noising the action for flow matching
@@ -259,6 +284,7 @@ class PiZero(Module):
 
         # actions
 
+        time_cond = self.to_time_cond(times)
         action_tokens = self.to_action_tokens(noised_actions)
 
         # language
@@ -296,16 +322,25 @@ class PiZero(Module):
 
         for (
             (attn, state_ff, actions_ff),
-            (actions_ada_rmsnorm, actions_ada_layerscale)
+            (attn_ada_rmsnorm, attn_ada_layerscale, ff_ada_rmsnorm, ff_ada_layerscale)
         ) in zip(self.layers, self.cond_layers):
 
+            action_tokens = attn_ada_rmsnorm(action_tokens, time_cond)
+
             state_out, actions_out = attn(state_tokens, action_tokens)
+
+            action_tokens = attn_ada_layerscale(action_tokens, time_cond)
 
             state_tokens = state_tokens + state_out
             action_tokens = action_tokens + actions_out
 
             state_tokens = state_ff(state_tokens) + state_tokens
+
+            action_tokens = ff_ada_rmsnorm(action_tokens, time_cond)
+
             action_tokens = actions_ff(action_tokens) + action_tokens
+
+            action_tokens = ff_ada_rmsnorm(action_tokens, time_cond)
 
         # unpack and unembed to predictions
 
