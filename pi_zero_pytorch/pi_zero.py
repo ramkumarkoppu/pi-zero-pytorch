@@ -69,7 +69,7 @@ class Attention(Module):
 
         mq, mk, mv, aq, ak, av = tuple(self.split_heads(t) for t in (mq, mk, mv, aq, ak, av))
 
-        q, k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mq, mk, mv), (aq, ak, v)))
+        q, k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mq, mk, mv), (aq, ak, av)))
 
         # attention
 
@@ -77,7 +77,7 @@ class Attention(Module):
 
         sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
 
-        causal_mask = torch.ones(sim.shape[-2], dtype = torch.bool, device = device).triu(1)
+        causal_mask = torch.ones(sim.shape[-2:], dtype = torch.bool, device = device).triu(1)
 
         sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
 
@@ -106,7 +106,7 @@ class SwiGLUFeedForward(Module):
         dim_inner = default(dim_inner, int(dim * expand_factor * 2 / 3))
 
         self.rmsnorm = nn.RMSNorm(dim)
-        self.proj_in = LinearNoBias(dim, dim_inner)
+        self.proj_in = LinearNoBias(dim, dim_inner * 2)
         self.proj_out = LinearNoBias(dim_inner, dim)
 
     def forward(
@@ -157,7 +157,11 @@ class PiZero(Module):
             state = state + state_out
             actions = actions + actions_out
 
-            state = state_ff(ff) + ff
+            state = state_ff(state) + state
             actions = actions_ff(actions) + actions
 
         return state, actions
+
+# fun
+
+π0 = PiZero

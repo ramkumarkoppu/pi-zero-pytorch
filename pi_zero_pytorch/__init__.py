@@ -1,1 +1,1 @@
-from pi_zero_pytorch.pi_zero import PiZero
+from pi_zero_pytorch.pi_zero import PiZero, π0
