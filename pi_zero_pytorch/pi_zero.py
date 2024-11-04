@@ -86,7 +86,6 @@ class Attention(Module):
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
 
         self.rmsnorm = nn.RMSNorm(dim)
-        self.actions_rmsnorm = nn.RMSNorm(dim)
 
         self.to_qkv = LinearNoBias(dim, 3 * dim_inner)
         self.to_out = LinearNoBias(dim_inner, dim)
@@ -107,7 +106,6 @@ class Attention(Module):
         seq_len, device = multimodal_seq.shape[-2], multimodal_seq.device
 
         multimodal_seq = self.rmsnorm(multimodal_seq)
-        actions = self.actions_rmsnorm(actions)
 
         # separate projections for multimodal seq vs actions
 
