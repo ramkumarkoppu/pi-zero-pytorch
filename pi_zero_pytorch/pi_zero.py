@@ -7,6 +7,8 @@ from torch import nn, tensor, is_tensor
 from torch.nn import Module, ModuleList
 from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 
+from rotary_embedding_torch import RotaryEmbedding
+
 import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, einsum, pack, unpack
@@ -118,6 +120,66 @@ class SwiGLUFeedForward(Module):
         seq = seq * F.gelu(gates)
         return self.proj_out(seq)
 
+# actions need time conditioning
+# ada-ln zero from DiT - here we will improvise with adaptive rmsnorm
+
+class RandomFourierEmbed(Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.proj = nn.Linear(1, dim)
+        self.proj.requires_grad_(False)
+
+    def forward(
+        self,
+        times,
+    ):
+        times = rearrange(times, '... -> ... 1')
+        rand_proj = self.proj(times)
+        return torch.cos(2 * pi * rand_proj)
+
+class AdaptiveRMSNorm(Module):
+    def __init__(
+        self,
+        dim,
+        dim_cond
+    ):
+        super().__init__()
+        self.norm = nn.RMSNorm(dim, elementwise_affine = False)
+
+        self.to_gamma = nn.Sequential(
+            nn.Linear(dim_cond, dim),
+            nn.Sigmoid()
+        )
+
+        self.to_beta = LinearNoBias(dim_cond, dim)
+
+    def forward(self, actions, cond):
+
+        normed = self.norm(actions)
+        normed_cond = self.norm_cond(cond)
+
+        gamma = self.to_gamma(normed_cond)
+        beta = self.to_beta(normed_cond)
+        return normed * gamma + beta
+
+class AdaptiveLayerscale(Module):
+    def __init__(
+        self,
+        dim,
+        dim_cond,
+        adaln_zero_bias_init_value = -2.
+    ):
+        super().__init__()
+        adaln_zero_gamma_linear = nn.Linear(dim_cond, dim)
+        nn.init.zeros_(adaln_zero_gamma_linear.weight)
+        nn.init.constant_(adaln_zero_gamma_linear.bias, adaln_zero_bias_init_value)
+
+        self.to_adaln_zero_gamma = adaln_zero_gamma_linear
+
+    def forward(self, actions, *, cond):
+        gamma = self.to_adaln_zero_gamma(cond)
+        return out * gamma.sigmoid()
+
 # main class
 
 class PiZero(Module):
@@ -126,6 +188,7 @@ class PiZero(Module):
         dim,
         num_tokens,
         dim_action_input,
+        dim_time_cond = None,
         depth = 12,
         dim_head = 64,
         heads = 8,
@@ -133,12 +196,16 @@ class PiZero(Module):
         vit: Module | None = None
     ):
         super().__init__()
+        dim_time_cond = default(dim_time_cond, dim * 2)
 
         self.vit = vit
 
         self.token_emb = nn.Embedding(num_tokens, dim)
 
+        self.rotary_emb = RotaryEmbedding(dim_head)
+
         layers = []
+        cond_layers = []
 
         for _ in range(depth):
             layers.append(ModuleList([
@@ -147,7 +214,13 @@ class PiZero(Module):
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor)
             ]))
 
+            cond_layers.append(ModuleList([
+                AdaptiveRMSNorm(dim, dim_time_cond),
+                AdaptiveLayerscale(dim, dim_time_cond)
+            ]))
+
         self.layers = ModuleList(layers)
+        self.cond_layers = ModuleList(cond_layers)
 
         self.final_norm = nn.RMSNorm(dim)
         self.final_actions_norm = nn.RMSNorm(dim)
@@ -159,7 +232,7 @@ class PiZero(Module):
         self,
         images,    # vision
         token_ids, # language
-        actions    # action
+        actions    # action,
     ):
 
         tokens = self.token_emb(token_ids)
@@ -180,7 +253,7 @@ class PiZero(Module):
 
         # transformer
 
-        for attn, state_ff, actions_ff in self.layers:
+        for (attn, state_ff, actions_ff), (actions_ada_rmsnorm, actions_ada_layerscale) in zip(self.layers, self.cond_layers):
 
             state_out, actions_out = attn(state, actions)
 
