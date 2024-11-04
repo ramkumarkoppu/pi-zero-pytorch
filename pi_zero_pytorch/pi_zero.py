@@ -211,6 +211,7 @@ class PiZero(Module):
         dim_head = 64,
         heads = 8,
         ff_expand_factor = 4.,
+        final_norm_softclamp_value = 30.,
         vit: Module | None = None,
         attn_kwargs: dict = dict(),
         ff_kwargs: dict = dict(),
@@ -258,6 +259,8 @@ class PiZero(Module):
 
         self.layers = ModuleList(layers)
         self.cond_layers = ModuleList(cond_layers)
+
+        self.final_norm_softclamp = partial(softclamp, final_norm_softclamp_value)
 
         self.final_norm = nn.RMSNorm(dim)
         self.final_actions_norm = nn.RMSNorm(dim)
@@ -365,19 +368,30 @@ class PiZero(Module):
 
         visual_tokens, tokens = unpack(state_tokens, packed_shape, 'b * d')
 
+        # gemma uses a final softclamp before norm
+
+        tokens, action_tokens = tuple(self.final_norm_softclamp(t) for t in (tokens, action_tokens))
+
+        # projection
+
         tokens = self.final_norm(tokens)
         actions = self.final_actions_norm(action_tokens)
 
-        language_logits = self.state_to_logits(tokens)
+        # language cross entropy loss
 
-        pred_actions_flow = self.actions_to_pred_flow(actions)
+        language_logits = self.state_to_logits(tokens)
 
         language_loss = F.cross_entropy(
             rearrange(language_logits[:, :-1], 'b n l -> b l n'),
             labels
         )
 
+        # flow loss for actions tokens
+
+        pred_actions_flow = self.actions_to_pred_flow(actions)
         flow_loss = F.mse_loss(flow, pred_actions_flow)
+
+        # total loss and return breakdown
 
         total_loss = (
             language_loss * self.lm_loss_weight,
