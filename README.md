@@ -55,3 +55,12 @@ sampled_actions = model(vision, commands, joint_state, trajectory_length = 32) #
     url     = {https://api.semanticscholar.org/CorpusID:273532030}
 }
 ```
+
+```bibtex
+@inproceedings{Yao2024FasterDiTTF,
+    title   = {FasterDiT: Towards Faster Diffusion Transformers Training without Architecture Modification},
+    author  = {Jingfeng Yao and Wang Cheng and Wenyu Liu and Xinggang Wang},
+    year    = {2024},
+    url     = {https://api.semanticscholar.org/CorpusID:273346237}
+}
+```

@@ -64,6 +64,11 @@ def softclamp(t, value):
 
     return (t / value).tanh() * value
 
+# losses
+
+def direction_loss(pred, target, dim = -1):
+    return 0.5 * (1. - F.cosine_similarity(pred, target, dim = dim))
+
 # attention
 
 class Attention(Module):
@@ -265,6 +270,7 @@ class PiZero(Module):
         ff_kwargs: dict = dict(),
         lm_loss_weight = 1.,
         flow_loss_weight = 1.,
+        direction_loss_weight = 0.,
         odeint_kwargs: dict = dict(
             atol = 1e-5,
             rtol = 1e-5,
@@ -340,9 +346,14 @@ class PiZero(Module):
         self.lm_loss_weight = lm_loss_weight
         self.flow_loss_weight = flow_loss_weight
 
+        self.has_direction_loss = direction_loss_weight > 0.
+        self.direction_loss_weight = direction_loss_weight
+
         # sampling related
 
         self.odeint_fn = partial(odeint, **odeint_kwargs)
+
+        self.register_buffer('zero', torch.tensor(0.), persistent = False)
 
     @property
     def device(self):
@@ -541,6 +552,13 @@ class PiZero(Module):
 
         flow_loss = F.mse_loss(flow, pred_actions_flow)
 
+        # maybe direction loss
+
+        dir_loss = self.zero
+
+        if self.has_direction_loss:
+            dir_loss = direction_loss(flow, pred_actions_flow)
+
         # language cross entropy loss
 
         language_logits = self.state_to_logits(tokens)
@@ -550,14 +568,19 @@ class PiZero(Module):
             labels
         )
 
+        # loss breakdonw
+
+        loss_breakdown = (language_loss, flow_loss, dir_loss)
+
         # total loss and return breakdown
 
         total_loss = (
             language_loss * self.lm_loss_weight +
-            flow_loss * self.flow_loss_weight
+            flow_loss * self.flow_loss_weight +
+            dir_loss * self.direction_loss_weight
         )
 
-        return total_loss, (language_loss, flow_loss)
+        return total_loss, loss_breakdown
 
 # fun
 
