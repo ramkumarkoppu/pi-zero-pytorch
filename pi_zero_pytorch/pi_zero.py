@@ -290,6 +290,7 @@ class PiZero(Module):
 
         self.to_joint_state_tokens = nn.Linear(dim_joint_state, dim)
 
+        self.dim_action_input = dim_action_input
         self.to_action_tokens = nn.Linear(dim_action_input, dim)
 
         self.to_time_cond = nn.Sequential(
@@ -343,14 +344,55 @@ class PiZero(Module):
 
         self.odeint_fn = partial(odeint, **odeint_kwargs)
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    @torch.no_grad()
     def sample(
         self,
         images,
         token_ids,
-        joint_state,
-        trajectory_length
+        joint_states,
+        trajectory_length: int,
+        steps = 18,
+        batch_size = 1
     ):
-        raise NotImplementedError
+        was_training = self.training
+        self.eval()
+
+        # ode step function
+
+        def ode_fn(timestep, denoised_actions):
+
+            flow = self.forward(
+                images,
+                token_ids,
+                joint_states,
+                denoised_actions,
+                times = timestep,
+                return_actions_flow = True,
+            )
+
+            return flow
+
+        # start with random gaussian noise - y0
+
+        noise = torch.randn((batch_size, trajectory_length, self.dim_action_input), device = self.device)
+
+        # time steps
+
+        times = torch.linspace(0., 1., steps, device = self.device)
+
+        # ode
+
+        trajectory = self.odeint_fn(ode_fn, noise, times)
+
+        sampled_actions = trajectory[-1]
+
+        self.train(was_training)
+
+        return sampled_actions
 
     def forward(
         self,
@@ -358,17 +400,24 @@ class PiZero(Module):
         token_ids,         # language
         joint_state,       # joint state
         actions  = None,   # action,
+        times = None,
+        return_actions_flow = False,
         **kwargs
     ):
 
         if not exists(actions):
-            return self.sample(images, token_ids, **kwargs)
+            return self.sample(images, token_ids, joint_state, **kwargs)
 
         batch, device = token_ids.shape[0], token_ids.device
 
         # noising the action for flow matching
 
-        times = torch.rand((batch,), device = device)
+        if not exists(times):
+            times = torch.rand((batch,), device = device)
+
+        if times.ndim == 0:
+            times = repeat(times, '-> b', b = batch)
+
         noise = torch.randn_like(actions)
 
         flow = actions - noise
@@ -483,6 +532,15 @@ class PiZero(Module):
         tokens = self.final_norm(tokens)
         actions = self.final_actions_norm(action_tokens)
 
+        # flow loss for actions tokens
+
+        pred_actions_flow = self.actions_to_pred_flow(actions)
+
+        if return_actions_flow:
+            return pred_actions_flow
+
+        flow_loss = F.mse_loss(flow, pred_actions_flow)
+
         # language cross entropy loss
 
         language_logits = self.state_to_logits(tokens)
@@ -491,11 +549,6 @@ class PiZero(Module):
             rearrange(language_logits[:, :-1], 'b n l -> b l n'),
             labels
         )
-
-        # flow loss for actions tokens
-
-        pred_actions_flow = self.actions_to_pred_flow(actions)
-        flow_loss = F.mse_loss(flow, pred_actions_flow)
 
         # total loss and return breakdown
 

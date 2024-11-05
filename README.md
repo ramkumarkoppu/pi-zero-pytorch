@@ -35,7 +35,7 @@ loss.backward()
 
 # after much training
 
-actions = model(vision, commands, joint_state, trajectory_length = 32)
+sampled_actions = model(vision, commands, joint_state, trajectory_length = 32) # (1, 32, 6)
 ```
 
 ## Citation
