@@ -361,7 +361,7 @@ class PiZero(Module):
     def device(self):
         return next(self.parameters()).device
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def sample(
         self,
         images,
