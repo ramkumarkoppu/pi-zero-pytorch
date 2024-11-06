@@ -14,6 +14,8 @@ import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, einsum, pack, unpack
 
+import tqdm
+
 # constants
 
 LinearNoBias = partial(nn.Linear, bias = False)
@@ -367,10 +369,13 @@ class PiZero(Module):
         joint_states,
         trajectory_length: int,
         steps = 18,
-        batch_size = 1
+        batch_size = 1,
+        show_pbar = True
     ):
         was_training = self.training
         self.eval()
+
+        pbar = tqdm.tqdm(desc = 'sampling action trajectory', disable = not show_pbar, total = steps)
 
         # ode step function
 
@@ -385,6 +390,7 @@ class PiZero(Module):
                 return_actions_flow = True,
             )
 
+            pbar.update(1)
             return flow
 
         # start with random gaussian noise - y0
@@ -403,6 +409,8 @@ class PiZero(Module):
 
         self.train(was_training)
 
+        pbar.close()
+
         return sampled_actions
 
     def forward(
@@ -410,7 +418,7 @@ class PiZero(Module):
         images,            # vision
         token_ids,         # language
         joint_state,       # joint state
-        actions  = None,   # action,
+        actions  = None,   # action
         times = None,
         return_actions_flow = False,
         **kwargs
@@ -568,7 +576,7 @@ class PiZero(Module):
             labels
         )
 
-        # loss breakdonw
+        # loss breakdown
 
         loss_breakdown = (language_loss, flow_loss, dir_loss)
 
