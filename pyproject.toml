@@ -30,6 +30,7 @@ dependencies = [
     "rotary-embedding-torch>=0.8.4",
     "torch>=2.5",
     'torchdiffeq',
+    "tqdm"
 ]
 
 [project.urls]
