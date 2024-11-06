@@ -107,7 +107,7 @@ class Attention(Module):
         multimodal_seq,
         actions,
         actions_value_residual = None,
-        return_values = False,
+        return_keys_values = False,
         flex_attn_fn: callable | None = None
     ):
         seq_len, device = multimodal_seq.shape[-2], multimodal_seq.device
@@ -163,10 +163,10 @@ class Attention(Module):
 
         output =  self.to_out(mout), self.to_actions_out(aout)
 
-        if not return_values:
+        if not return_keys_values:
             return output
 
-        return output, av
+        return output, (mk, mv, ak, av)
 
 # attention
 
@@ -379,18 +379,23 @@ class PiZero(Module):
 
         # ode step function
 
-        def ode_fn(timestep, denoised_actions):
+        cached_state_kv = None
 
-            flow = self.forward(
+        def ode_fn(timestep, denoised_actions):
+            nonlocal cached_state_kv
+
+            flow, cached_state_kv = self.forward(
                 images,
                 token_ids,
                 joint_states,
                 denoised_actions,
                 times = timestep,
                 return_actions_flow = True,
+                return_state_keys_values = True
             )
 
             pbar.update(1)
+
             return flow
 
         # start with random gaussian noise - y0
@@ -421,8 +426,11 @@ class PiZero(Module):
         actions  = None,   # action
         times = None,
         return_actions_flow = False,
+        return_state_keys_values = False,
+        cached_state_keys_values = None,
         **kwargs
     ):
+        received_state_cache = exists(cached_state_keys_values)
 
         if not exists(actions):
             return self.sample(images, token_ids, joint_state, **kwargs)
@@ -437,17 +445,20 @@ class PiZero(Module):
         if times.ndim == 0:
             times = repeat(times, '-> b', b = batch)
 
-        noise = torch.randn_like(actions)
+        # if not returning the actions predicted flow, assume training and noise the actions for loss
 
-        flow = actions - noise
-        padded_times = rearrange(times, 'b -> b 1 1')
+        if not return_actions_flow:
+            noise = torch.randn_like(actions)
 
-        noised_actions = noise * (1. - padded_times) + padded_times * actions
+            flow = actions - noise
+            padded_times = rearrange(times, 'b -> b 1 1')
+
+            actions = noise * (1. - padded_times) + padded_times * actions
 
         # actions
 
         time_cond = self.to_time_cond(times)
-        action_tokens = self.to_action_tokens(noised_actions)
+        action_tokens = self.to_action_tokens(actions)
 
         # language
 
@@ -508,6 +519,10 @@ class PiZero(Module):
                 score_mod = score_mod
             )
 
+        # state keys and values for caching during inference
+
+        state_cached_keys_values = []
+
         # value residual learning
 
         actions_value_residual = None
@@ -521,14 +536,16 @@ class PiZero(Module):
 
             action_tokens = attn_ada_rmsnorm(action_tokens, time_cond)
 
-            (state_out, actions_out), action_values = attn(state_tokens, action_tokens, flex_attn_fn = flex_attn_fn, actions_value_residual = actions_value_residual, return_values = True)
+            (state_attn_out, actions_attn_out), (state_keys, state_values, action_keys, action_values) = attn(state_tokens, action_tokens, flex_attn_fn = flex_attn_fn, actions_value_residual = actions_value_residual, return_keys_values = True)
+
+            state_cached_keys_values.append((state_keys, state_values))
 
             actions_value_residual = default(actions_value_residual, action_values)
 
             action_tokens = attn_ada_layerscale(action_tokens, time_cond)
 
-            state_tokens = state_tokens + state_out
-            action_tokens = action_tokens + actions_out
+            state_tokens = state_tokens + state_attn_out
+            action_tokens = action_tokens + actions_attn_out
 
             state_tokens = state_ff(state_tokens) + state_tokens
 
@@ -556,7 +573,10 @@ class PiZero(Module):
         pred_actions_flow = self.actions_to_pred_flow(actions)
 
         if return_actions_flow:
-            return pred_actions_flow
+            if not return_state_keys_values:
+                return pred_actions_flow
+
+            return pred_actions_flow, state_cached_keys_values
 
         flow_loss = F.mse_loss(flow, pred_actions_flow)
 
