@@ -4,7 +4,6 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from torch import pi, nn, tensor, is_tensor
-from torch.nn.attention import SDPBackend
 from torch.nn import Module, ModuleList
 
 from torchdiffeq import odeint
@@ -20,13 +19,6 @@ import tqdm
 # constants
 
 LinearNoBias = partial(nn.Linear, bias = False)
-
-SDP_BACKEND_MAP = dict(
-    enable_flash = SDPBackend.FLASH_ATTENTION,
-    enable_mem_efficient = SDPBackend.EFFICIENT_ATTENTION,
-    enable_math = SDPBackend.MATH,
-    enable_cudnn = SDPBackend.CUDNN_ATTENTION
-)
 
 # flex attention related
 # https://pytorch.org/blog/flexattention/
@@ -89,13 +81,7 @@ class Attention(Module):
         heads = 8,
         dropout = 0.,
         softclamp_value = 50.,
-        rotary_emb: RotaryEmbedding | None = None,
-        flash_kwargs: dict = dict(
-            enable_flash = True,
-            enable_math = True,
-            enable_mem_efficient = True,
-            enable_cudnn = True
-        ),
+        rotary_emb: RotaryEmbedding | None = None
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -115,11 +101,6 @@ class Attention(Module):
         self.to_actions_out = LinearNoBias(dim_inner, dim)
 
         self.softclamp_value = softclamp_value
-
-        # flash attention related
-
-        sdpa_backends = [SDP_BACKEND_MAP[enable_str] for enable_str, enable in flash_kwargs.items() if enable]
-        self.sdpa_context_manager = partial(torch.nn.attention.sdpa_kernel, sdpa_backends)
 
     def forward_actions_with_cached_state(
         self,
@@ -145,11 +126,13 @@ class Attention(Module):
 
         # attention
 
-        with self.sdpa_context_manager():
-            out = F.scaled_dot_product_attention(
-                q, k, v,
-                scale = self.scale
-            )
+        q = q * self.scale
+
+        sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
+
+        attn = sim.softmax(dim = -1)
+
+        out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
 
         # merge attention heads
 
