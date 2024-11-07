@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Callable
 from functools import partial
 
 import torch
@@ -107,7 +108,8 @@ class Attention(Module):
         actions,
         cached_state_keys_values: tuple[Tensor, Tensor],
         actions_value_residual: Tensor | None = None,
-        return_keys_values = False
+        return_keys_values = False,
+        flex_attn_fn: Callable | None = None
     ):
         aq, ak, av = self.to_actions_qkv(actions).chunk(3, dim = -1)
 
@@ -126,13 +128,18 @@ class Attention(Module):
 
         # attention
 
-        q = q * self.scale
+        if exists(flex_attn_fn):
+            out = flex_attn_fn(q, k, v)
+        else:
+            q = q * self.scale
 
-        sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
+            sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
 
-        attn = sim.softmax(dim = -1)
+            sim = softclamp(sim, self.softclamp_value)
 
-        out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
+            attn = sim.softmax(dim = -1)
+
+            out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
 
         # merge attention heads
 
@@ -151,7 +158,7 @@ class Attention(Module):
         actions,
         actions_value_residual: Tensor | None = None,
         return_keys_values = False,
-        flex_attn_fn: callable | None = None
+        flex_attn_fn: Callable | None = None
     ):
         seq_len, device = multimodal_seq.shape[-2], multimodal_seq.device
 
@@ -474,8 +481,8 @@ class PiZero(Module):
         cached_state_keys_values: list[tuple[Tensor, Tensor]] | None = None,
         **kwargs
     ):
-        received_state_cache = exists(cached_state_keys_values)
-        assert not (received_state_cache and not return_actions_flow), 'must be generating action trajectory if receiving cached state key values'
+        inferencing = exists(cached_state_keys_values)
+        assert not (inferencing and not return_actions_flow), 'must be generating action trajectory if receiving cached state key values'
 
         if not exists(actions):
             return self.sample(images, token_ids, joint_state, **kwargs)
@@ -505,7 +512,7 @@ class PiZero(Module):
         time_cond = self.to_time_cond(times)
         action_tokens = self.to_action_tokens(actions)
 
-        if not received_state_cache:
+        if not inferencing:
             # language
 
             labels = token_ids[:, 1:]
@@ -545,17 +552,20 @@ class PiZero(Module):
 
         flex_attn_fn = None
 
-        if self.use_flex_attn and state_tokens.is_cuda and not received_state_cache:
+        if self.use_flex_attn and state_tokens.is_cuda:
 
-            prefix_length = state_tokens.shape[-2]
-            seq_len = prefix_length + action_tokens.shape[-2]
+            block_mask = None
 
-            block_mask = create_block_mask(
-                create_pizero_attn_mask(prefix_length),
-                Q_LEN = seq_len,
-                KV_LEN = seq_len,
-                device = state_tokens.device
-            )
+            if not inferencing:
+                prefix_length = state_tokens.shape[-2]
+                seq_len = prefix_length + action_tokens.shape[-2]
+
+                block_mask = create_block_mask(
+                    create_pizero_attn_mask(prefix_length),
+                    Q_LEN = seq_len,
+                    KV_LEN = seq_len,
+                    device = state_tokens.device
+                )
 
             score_mod_fn = softclamp_score_mod(self.attn_softclamp_value)
 
@@ -577,7 +587,7 @@ class PiZero(Module):
 
         # transformer
 
-        if not received_state_cache:
+        if not inferencing:
             for (
                 (attn, state_ff, actions_ff),
                 (attn_ada_rmsnorm, attn_ada_layerscale, ff_ada_rmsnorm, ff_ada_layerscale)
@@ -629,7 +639,7 @@ class PiZero(Module):
 
                 action_tokens = ff_ada_rmsnorm(action_tokens, time_cond)
 
-        if not received_state_cache:
+        if not inferencing:
             # unpack and unembed to predictions
 
             visual_tokens, tokens, _ = unpack(state_tokens, packed_shape, 'b * d')
