@@ -332,6 +332,8 @@ class PiZero(Module):
         super().__init__()
         dim_time_cond = default(dim_time_cond, dim * 2)
 
+        self.dim = dim
+
         # flex attention related
 
         assert not (use_flex_attn and not exists(flex_attention)), 'flex attention cannot be used'
@@ -476,6 +478,7 @@ class PiZero(Module):
         joint_state,       # joint state
         actions  = None,   # action
         times = None,
+        reward_tokens = None,
         return_actions_flow = False,
         return_state_keys_values = False,
         cached_state_keys_values: list[tuple[Tensor, Tensor]] | None = None,
@@ -544,9 +547,14 @@ class PiZero(Module):
 
             joint_state_tokens = self.to_joint_state_tokens(joint_state)
 
+            # maybe reward tokens
+
+            if not exists(reward_tokens):
+                reward_tokens = visual_tokens.new_empty((batch, 0, self.dim))
+
             # concat visual rep with language
 
-            state_tokens, packed_shape = pack([visual_tokens, language_tokens, joint_state_tokens], 'b * d')
+            state_tokens, packed_shape = pack([visual_tokens, language_tokens, joint_state_tokens, reward_tokens], 'b * d')
 
         # prepare maybe flex attention
 
@@ -642,7 +650,7 @@ class PiZero(Module):
         if not inferencing:
             # unpack and unembed to predictions
 
-            visual_tokens, tokens, _ = unpack(state_tokens, packed_shape, 'b * d')
+            visual_tokens, tokens, *_ = unpack(state_tokens, packed_shape, 'b * d')
 
             # gemma uses a final softclamp before norm
 
