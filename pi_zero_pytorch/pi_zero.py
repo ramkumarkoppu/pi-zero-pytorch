@@ -420,6 +420,7 @@ class PiZero(Module):
         token_ids,
         joint_states,
         trajectory_length: int,
+        reward_tokens = None,
         steps = 18,
         batch_size = 1,
         show_pbar = True
@@ -442,6 +443,7 @@ class PiZero(Module):
                 joint_states,
                 denoised_actions,
                 times = timestep,
+                reward_tokens = reward_tokens,
                 cached_state_keys_values = cached_state_kv,
                 return_actions_flow = True,
                 return_state_keys_values = True
