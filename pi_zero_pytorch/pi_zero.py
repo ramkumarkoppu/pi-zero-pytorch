@@ -15,7 +15,23 @@ import einx
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, einsum, pack, unpack
 
+from pi_zero_pytorch.tensor_typing import Float, Int, Bool
+
 import tqdm
+
+# ein notation
+
+# b - batch
+# n - sequence
+# na - seq of actions
+# nt - seq of text tokens
+# nv - seq of visual tokens
+# d - dimension
+# da - action dimension
+# c - image channels
+# h - image height
+# w - image width
+# f - image frames
 
 # constants
 
@@ -318,6 +334,7 @@ class PiZero(Module):
         attn_softclamp_value = 50.,
         final_norm_softclamp_value = 30.,
         vit: Module | None = None,
+        vit_dim = None,
         attn_kwargs: dict = dict(),
         ff_kwargs: dict = dict(),
         lm_loss_weight = 1.,
@@ -343,6 +360,8 @@ class PiZero(Module):
         # vit
 
         self.vit = vit
+
+        self.maybe_to_image_tokens = nn.Linear(vit_dim, dim) if vit_dim != dim else nn.Identity()
 
         # embedding
 
@@ -475,12 +494,12 @@ class PiZero(Module):
 
     def forward(
         self,
-        images,            # vision
-        token_ids,         # language
-        joint_state,       # joint state
-        actions  = None,   # action
-        times = None,
-        reward_tokens = None,
+        images: Float['b nv d'] | Float['b c h w'] | Float['b c f h w'], # vision
+        token_ids: Int['b nt'],                                          # language
+        joint_state: Float['b djs'],                                     # joint state
+        actions: Float['b na da'] | None = None,                         # action
+        times: Float['b'] = None,
+        reward_token: Float['b d'] | None = None,
         return_actions_flow = False,
         return_state_keys_values = False,
         cached_state_keys_values: list[tuple[Tensor, Tensor]] | None = None,
@@ -531,19 +550,22 @@ class PiZero(Module):
                 is_multiple_images = images.ndim == 5
 
                 if is_multiple_images:
+                    images = rearrange(images, 'b c f h w -> b f c h w')
                     images, images_frames_packed_shape = pack([images], '* c h w')
 
                 with torch.no_grad():
-                    self.vit.eval()
+                    self.vit.eval()                    
                     visual_tokens = self.vit(images)
 
                 if is_multiple_images:
-                    visual_tokens = unpack(visual_tokens, images_frames_packed_shape, '* n d')
+                    visual_tokens, = unpack(visual_tokens, images_frames_packed_shape, '* n d')
                     visual_tokens = rearrange(visual_tokens, 'b f n d -> b (f n) d')
 
             else:
                 assert images.ndim == 3, 'images must be already encoded as (batch, seq, feature dimension)'
                 visual_tokens = images
+
+            visual_tokens = self.maybe_to_image_tokens(visual_tokens)
 
             # joint state
 
