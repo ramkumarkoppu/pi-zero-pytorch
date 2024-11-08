@@ -64,3 +64,5 @@ sampled_actions = model(vision, commands, joint_state, trajectory_length = 32) #
     url     = {https://api.semanticscholar.org/CorpusID:273346237}
 }
 ```
+
+[*dear alice*](https://www.youtube.com/watch?v=z-Ng5ZvrDm4)
