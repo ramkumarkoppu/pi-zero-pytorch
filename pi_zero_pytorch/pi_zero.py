@@ -28,6 +28,7 @@ import tqdm
 # nv - seq of visual tokens
 # d - dimension
 # da - action dimension
+# djs - joint state dimension
 # c - image channels
 # h - image height
 # w - image width
