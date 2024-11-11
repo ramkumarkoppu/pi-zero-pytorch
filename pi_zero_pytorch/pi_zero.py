@@ -500,7 +500,7 @@ class PiZero(Module):
         joint_state: Float['b djs'],                                     # joint state
         actions: Float['b na da'] | None = None,                         # action
         times: Float['b'] = None,
-        reward_token: Float['b d'] | None = None,
+        reward_tokens: Float['b d'] | None = None,
         return_actions_flow = False,
         return_state_keys_values = False,
         cached_state_keys_values: list[tuple[Tensor, Tensor]] | None = None,
