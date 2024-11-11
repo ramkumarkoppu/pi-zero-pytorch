@@ -9,7 +9,10 @@ from torch.nn import Module, ModuleList
 
 from torchdiffeq import odeint
 
-from rotary_embedding_torch import RotaryEmbedding
+from rotary_embedding_torch import (
+    RotaryEmbedding,
+    apply_rotary_emb
+)
 
 import einx
 from einops.layers.torch import Rearrange
@@ -124,6 +127,7 @@ class Attention(Module):
         self,
         actions,
         cached_state_keys_values: tuple[Tensor, Tensor],
+        rotary_emb = None,
         actions_value_residual: Tensor | None = None,
         return_keys_values = False,
         flex_attn_fn: Callable | None = None
@@ -140,7 +144,11 @@ class Attention(Module):
 
         k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mk, mv), (ak, av)))
 
-        if exists(self.rotary_emb):
+        if exists(rotary_emb):
+            q = apply_rotary_emb(rotary_emb, q)
+            k = apply_rotary_emb(rotary_emb, k)
+
+        elif exists(self.rotary_emb):
             q, k = self.rotary_emb.rotate_queries_with_cached_keys(q, k)
 
         # attention
@@ -173,6 +181,7 @@ class Attention(Module):
         self,
         multimodal_seq,
         actions,
+        rotary_emb = None,
         actions_value_residual: Tensor | None = None,
         return_keys_values = False,
         flex_attn_fn: Callable | None = None
@@ -194,7 +203,10 @@ class Attention(Module):
 
         q, k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mq, mk, mv), (aq, ak, av)))
 
-        if exists(self.rotary_emb):
+        if exists(rotary_emb):
+            q = apply_rotary_emb(rotary_emb, q)
+            k = apply_rotary_emb(rotary_emb, k)
+        elif exists(self.rotary_emb):
             q = self.rotary_emb.rotate_queries_or_keys(q)
             k = self.rotary_emb.rotate_queries_or_keys(k)
 
@@ -390,7 +402,7 @@ class PiZero(Module):
 
         for _ in range(depth):
             layers.append(ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, rotary_emb = self.rotary_emb, **attn_kwargs),
+                Attention(dim = dim, dim_head = dim_head, heads = heads, **attn_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
             ]))
@@ -608,6 +620,20 @@ class PiZero(Module):
                 score_mod = score_mod
             )
 
+        # prepare rotary embeddings
+
+        action_length = actions.shape[-2]
+
+        if inferencing:
+            state_length = cached_state_keys_values[0][0].shape[-2]
+        else:
+            state_length = state_tokens.shape[-2]
+
+        total_seq_length = action_length + state_length
+
+        seq = torch.arange(total_seq_length, device = self.device)
+        rotary_emb = self.rotary_emb(seq)
+
         # state keys and values for caching during inference
 
         cached_state_key_values_iter = iter(default(cached_state_keys_values, []))
@@ -628,7 +654,7 @@ class PiZero(Module):
 
                 action_tokens = attn_ada_rmsnorm(action_tokens, time_cond)
 
-                (state_attn_out, actions_attn_out), (state_keys, state_values, action_keys, action_values) = attn(state_tokens, action_tokens, flex_attn_fn = flex_attn_fn, actions_value_residual = actions_value_residual, return_keys_values = True)
+                (state_attn_out, actions_attn_out), (state_keys, state_values, action_keys, action_values) = attn(state_tokens, action_tokens, rotary_emb = rotary_emb, flex_attn_fn = flex_attn_fn, actions_value_residual = actions_value_residual, return_keys_values = True)
 
                 state_cached_keys_values.append((state_keys, state_values))
 
@@ -656,7 +682,7 @@ class PiZero(Module):
 
                 action_tokens = attn_ada_rmsnorm(action_tokens, time_cond)
 
-                actions_attn_out, (state_keys, state_values, action_keys, action_values) = attn.forward_actions_with_cached_state(action_tokens, cached_state_keys_values = next(cached_state_key_values_iter), return_keys_values = True)
+                actions_attn_out, (state_keys, state_values, action_keys, action_values) = attn.forward_actions_with_cached_state(action_tokens, cached_state_keys_values = next(cached_state_key_values_iter), rotary_emb = rotary_emb, return_keys_values = True)
 
                 state_cached_keys_values.append((state_keys, state_values))
 
