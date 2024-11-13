@@ -1,5 +1,8 @@
 from __future__ import annotations
-from typing import Callable
+
+from beartype.typing import Callable
+from beartype import beartype
+
 from functools import partial
 
 import torch
@@ -19,6 +22,7 @@ from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, einsum, pack, unpack
 
 from pi_zero_pytorch.tensor_typing import Float, Int, Bool
+
 
 import tqdm
 
@@ -95,6 +99,7 @@ def direction_loss(pred, target, dim = -1):
 # attention
 
 class Attention(Module):
+    @beartype
     def __init__(
         self,
         dim,
@@ -332,6 +337,7 @@ class AdaptiveLayerscale(Module):
 # main class
 
 class PiZero(Module):
+    @beartype
     def __init__(
         self,
         dim,
