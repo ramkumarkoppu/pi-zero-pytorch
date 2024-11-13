@@ -42,7 +42,8 @@ Repository = "https://github.com/lucidrains/pi-zero-pytorch"
 [project.optional-dependencies]
 examples = []
 test = [
-    "pytest"
+    "pytest",
+    "vit-pytorch>=1.8.7"
 ]
 
 [tool.pytest.ini_options]
