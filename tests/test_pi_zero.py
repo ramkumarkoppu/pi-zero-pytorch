@@ -28,13 +28,13 @@ def test_pi_zero_with_vit():
         num_tokens = 20_000
     )
 
-    vision = torch.randn(1, 1024, 512)
+    vision = torch.randn(2, 1024, 512)
 
-    images = torch.randn(1, 3, 2, 256, 256)
+    images = torch.randn(2, 3, 2, 256, 256)
 
-    commands = torch.randint(0, 20_000, (1, 1024))
-    joint_state = torch.randn(1, 12)
-    actions = torch.randn(1, 32, 6)
+    commands = torch.randint(0, 20_000, (2, 1024))
+    joint_state = torch.randn(2, 12)
+    actions = torch.randn(2, 32, 6)
 
     loss, _ = model(images, commands, joint_state, actions)
     loss.backward()
@@ -43,4 +43,4 @@ def test_pi_zero_with_vit():
 
     sampled_actions = model(images, commands, joint_state, trajectory_length = 32) # (1, 32, 6)
 
-    assert sampled_actions.shape == (1, 32, 6)
+    assert sampled_actions.shape == (2, 32, 6)
