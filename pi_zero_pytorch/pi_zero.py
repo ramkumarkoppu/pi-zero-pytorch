@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from random import random
+
 from beartype.typing import Callable
 from beartype import beartype
 
@@ -425,6 +427,7 @@ class PiZero(Module):
         flow_loss_weight = 1.,
         direction_loss_weight = 0.,
         immiscible_flow = False, # https://arxiv.org/abs/2406.12303
+        reward_tokens_dropout_prob = 0.,
         odeint_kwargs: dict = dict(
             atol = 1e-5,
             rtol = 1e-5,
@@ -511,6 +514,10 @@ class PiZero(Module):
 
         self.immiscible_flow = immiscible_flow
 
+        # reward classifier free guidance
+
+        self.reward_tokens_dropout_prob = reward_tokens_dropout_prob
+
         # loss related
 
         self.lm_loss_weight = lm_loss_weight
@@ -524,6 +531,10 @@ class PiZero(Module):
         self.odeint_fn = partial(odeint, **odeint_kwargs)
 
         self.register_buffer('zero', torch.tensor(0.), persistent = False)
+
+    @property
+    def can_cfg(self):
+        return self.reward_tokens_dropout_prob > 0.
 
     @property
     def device(self):
@@ -596,6 +607,25 @@ class PiZero(Module):
         pbar.close()
 
         return sampled_actions
+
+    def forward_with_reward_cfg(
+        self,
+        *args,
+        reward_tokens: Float['b d'] | None = None,
+        cond_scale = 1.,
+        **kwargs
+    ):
+
+        out = self.forward(
+            *args,
+            reward_tokens = reward_tokens,
+            **kwargs
+        )
+
+        if not exists(reward_tokens) or cond_scale == 1.:
+            return out
+
+        raise NotImplementedError
 
     def forward(
         self,
@@ -688,6 +718,11 @@ class PiZero(Module):
 
             if not exists(reward_tokens):
                 reward_tokens = visual_tokens.new_empty((batch, 0, self.dim))
+
+            # maybe dropout reward tokens
+
+            if self.training and random() < self.reward_tokens_dropout_prob:
+                reward_tokens = reward_tokens[:, 0:0]
 
             # concat visual rep with language
 
