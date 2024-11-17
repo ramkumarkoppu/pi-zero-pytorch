@@ -74,4 +74,15 @@ sampled_actions = model(vision, commands, joint_state, trajectory_length = 32) #
 }
 ```
 
+```bibtex
+@article{Li2024ImmiscibleDA,
+    title   = {Immiscible Diffusion: Accelerating Diffusion Training with Noise Assignment},
+    author  = {Yiheng Li and Heyang Jiang and Akio Kodaira and Masayoshi Tomizuka and Kurt Keutzer and Chenfeng Xu},
+    journal = {ArXiv},
+    year    = {2024},
+    volume  = {abs/2406.12303},
+    url     = {https://api.semanticscholar.org/CorpusID:270562607}
+}
+```
+
 [*dear alice*](https://www.youtube.com/watch?v=z-Ng5ZvrDm4)
