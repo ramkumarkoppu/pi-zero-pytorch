@@ -30,6 +30,7 @@ dependencies = [
     "einops>=0.8.0",
     "jaxtyping",
     "rotary-embedding-torch>=0.8.5",
+    'scipy',
     "torch>=2.5",
     'torchdiffeq',
     "tqdm"

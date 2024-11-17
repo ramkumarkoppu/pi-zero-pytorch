@@ -12,6 +12,8 @@ from torch.nn import Module, ModuleList
 
 from torchdiffeq import odeint
 
+from scipy.optimize import linear_sum_assignment
+
 from rotary_embedding_torch import (
     RotaryEmbedding,
     apply_rotary_emb
@@ -116,6 +118,15 @@ def pad_at_dim(
     dims_from_right = (- dim - 1) if dim < 0 else (t.ndim - dim - 1)
     zeros = ((0, 0) * dims_from_right)
     return F.pad(t, (*zeros, *pad), value = value)
+
+# flow related
+
+def noise_assignment(data, noise):
+    device = data.device
+    data, noise = tuple(rearrange(t, 'b ... -> b (...)') for t in (data, noise))
+    dist = torch.cdist(data, noise)
+    _, assign = linear_sum_assignment(dist.cpu())
+    return torch.from_numpy(assign).to(device)
 
 # losses
 
@@ -413,6 +424,7 @@ class PiZero(Module):
         lm_loss_weight = 1.,
         flow_loss_weight = 1.,
         direction_loss_weight = 0.,
+        immiscible_flow = False, # https://arxiv.org/abs/2406.12303
         odeint_kwargs: dict = dict(
             atol = 1e-5,
             rtol = 1e-5,
@@ -494,6 +506,10 @@ class PiZero(Module):
         # the language token id padding id, for fine-tuning as well as taking care of the masking on top of causal mask
 
         self.lm_pad_id = lm_pad_id
+
+        # flow related
+
+        self.immiscible_flow = immiscible_flow
 
         # loss related
 
@@ -614,6 +630,10 @@ class PiZero(Module):
 
         if not return_actions_flow:
             noise = torch.randn_like(actions)
+
+            if self.immiscible_flow:
+                assignment = noise_assignment(actions, noise)
+                noise = noise[assignment]
 
             flow = actions - noise
             padded_times = rearrange(times, 'b -> b 1 1')
