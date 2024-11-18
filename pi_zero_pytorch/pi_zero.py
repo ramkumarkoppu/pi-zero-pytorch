@@ -672,15 +672,13 @@ class PiZero(Module):
             return_actions_flow = True,
         )
 
-        maybe_reward_out = self.forward(
+        action_flow_with_reward, with_reward_cache_kv = self.forward(
             *args,
             reward_tokens = reward_tokens,
             cached_state_keys_values = with_reward_cache,
             **forward_kwargs,
             **kwargs
         )
-
-        action_flow_with_reward, with_reward_cache_kv = maybe_reward_out
 
         if not exists(reward_tokens) or cond_scale == 0.:
             return action_flow_with_reward, (with_reward_cache_kv, None)
