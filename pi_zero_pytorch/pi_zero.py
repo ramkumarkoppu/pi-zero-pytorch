@@ -664,7 +664,6 @@ class PiZero(Module):
         keep_parallel_frac = 0.,
         **kwargs
     ):
-        assert self.can_cfg, 'you need to train with reward token dropout'
 
         with_reward_cache, without_reward_cache = cached_state_keys_values
 
@@ -685,6 +684,8 @@ class PiZero(Module):
 
         if not exists(reward_tokens) or cond_scale == 0.:
             return action_flow_with_reward, (with_reward_cache_kv, None)
+
+        assert self.can_cfg, 'you need to train with reward token dropout'
 
         action_flow_without_reward, without_reward_cache_kv = self.forward(
             *args,
