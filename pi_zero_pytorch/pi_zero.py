@@ -623,8 +623,6 @@ class PiZero(Module):
                 cond_scale = cond_scale,
                 remove_parallel_component = remove_parallel_component,
                 keep_parallel_frac = keep_parallel_frac,
-                return_actions_flow = True,
-                return_state_keys_values = True
             )
 
             if cache_kv:
@@ -664,19 +662,22 @@ class PiZero(Module):
         cond_scale = 0.,
         remove_parallel_component = False,
         keep_parallel_frac = 0.,
-        return_state_keys_values = True,
-
         **kwargs
     ):
-        assert return_state_keys_values, 'cached key values must be turned on'
+        assert self.can_cfg, 'you need to train with reward token dropout'
 
         with_reward_cache, without_reward_cache = cached_state_keys_values
+
+        forward_kwargs = dict(
+            return_state_keys_values = True,
+            return_actions_flow = True,
+        )
 
         maybe_reward_out = self.forward(
             *args,
             reward_tokens = reward_tokens,
             cached_state_keys_values = with_reward_cache,
-            return_state_keys_values = return_state_keys_values,
+            **forward_kwargs,
             **kwargs
         )
 
@@ -685,14 +686,12 @@ class PiZero(Module):
         if not exists(reward_tokens) or cond_scale == 0.:
             return action_flow_with_reward, (with_reward_cache_kv, None)
 
-        no_reward_out = self.forward(
+        action_flow_without_reward, without_reward_cache_kv = self.forward(
             *args,
             cached_state_keys_values = without_reward_cache,
-            return_state_keys_values = return_state_keys_values,
+            **forward_kwargs,
             **kwargs
         )
-
-        action_flow_without_reward, without_reward_cache_kv = no_reward_out
 
         update = action_flow_with_reward - action_flow_without_reward
 
