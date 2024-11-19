@@ -164,11 +164,6 @@ def noise_assignment(data, noise):
     _, assign = linear_sum_assignment(dist.cpu())
     return torch.from_numpy(assign).to(device)
 
-# losses
-
-def direction_loss(pred, target, dim = -1):
-    return 0.5 * (1. - F.cosine_similarity(pred, target, dim = dim))
-
 # attention
 
 class Attention(Module):
@@ -459,7 +454,6 @@ class PiZero(Module):
         lm_pad_id = -1,
         lm_loss_weight = 1.,
         flow_loss_weight = 1.,
-        direction_loss_weight = 0.,
         immiscible_flow = False, # https://arxiv.org/abs/2406.12303
         reward_tokens_dropout_prob = 0.,
         odeint_kwargs: dict = dict(
@@ -556,9 +550,6 @@ class PiZero(Module):
 
         self.lm_loss_weight = lm_loss_weight
         self.flow_loss_weight = flow_loss_weight
-
-        self.has_direction_loss = direction_loss_weight > 0.
-        self.direction_loss_weight = direction_loss_weight
 
         # sampling related
 
@@ -946,14 +937,7 @@ class PiZero(Module):
             return pred_actions_flow, state_cached_keys_values
 
         flow_loss = F.mse_loss(flow, pred_actions_flow)
-
-        # maybe direction loss
-
-        dir_loss = self.zero
-
-        if self.has_direction_loss:
-            dir_loss = direction_loss(flow, pred_actions_flow)
-
+        
         # language cross entropy loss
 
         tokens = self.final_norm(tokens)
@@ -968,14 +952,13 @@ class PiZero(Module):
 
         # loss breakdown
 
-        loss_breakdown = (language_loss, flow_loss, dir_loss)
+        loss_breakdown = (language_loss, flow_loss)
 
         # total loss and return breakdown
 
         total_loss = (
             language_loss * self.lm_loss_weight +
-            flow_loss * self.flow_loss_weight +
-            dir_loss * self.direction_loss_weight
+            flow_loss * self.flow_loss_weight
         )
 
         return total_loss, loss_breakdown
