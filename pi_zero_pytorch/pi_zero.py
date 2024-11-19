@@ -62,11 +62,15 @@ def create_pizero_attn_mask(prefix_causal_length, mask: Bool['b n']):
     # the pi-zero attention is a triangular causal mask, but bidirectional attention for the actions at the very right hand side
 
     def mask_fn(batch_index, head_index, query_index, key_index):
-        return (
-            mask[batch_index, key_index] and    # variable length states
-            query_index >= key_index and        # causal
-            key_index >= prefix_causal_length   # bidirectional
+        key_mask = mask[batch_index, key_index]   # variable length states
+        causal_mask = query_index >= key_index    # causal
+
+        bidirectional_action_mask = (             # bidirectional action mask
+            key_index >= prefix_causal_length and
+            query_index >= prefix_causal_length
         )
+
+        return (key_mask and causal_mask) or bidirectional_action_mask
 
     return mask_fn
 
