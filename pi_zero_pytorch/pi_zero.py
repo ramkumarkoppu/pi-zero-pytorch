@@ -588,13 +588,14 @@ class PiZero(Module):
         raise NotImplementedError
 
     @torch.inference_mode()
-    def sample(
+    def sample_actions(
         self,
         images,
         token_ids,
         joint_states,
         trajectory_length: int,
-        reward_tokens = None,
+        reward_tokens: Float['b d'] = None,
+        internal_state_tokens: Float['b ns d'] | None = None,
         steps = 18,
         show_pbar = True,
         cond_scale = 0.,
@@ -625,6 +626,7 @@ class PiZero(Module):
                 denoised_actions,
                 times = timestep,
                 reward_tokens = reward_tokens,
+                internal_state_tokens = internal_state_tokens,
                 cached_state_keys_values = (cached_state_kv, null_cached_state_kv),
                 cond_scale = cond_scale,
                 remove_parallel_component = remove_parallel_component,
@@ -728,7 +730,7 @@ class PiZero(Module):
         assert not (inferencing and not return_actions_flow), 'must be generating action trajectory if receiving cached state key values'
 
         if not exists(actions):
-            return self.sample(images, token_ids, joint_state, **kwargs)
+            return self.sample_actions(images, token_ids, joint_state, **kwargs)
 
         batch, device = token_ids.shape[0], token_ids.device
 
