@@ -17,6 +17,8 @@ from torchdiffeq import odeint
 
 from scipy.optimize import linear_sum_assignment
 
+from ema_pytorch import EMA
+
 from rotary_embedding_torch import (
     RotaryEmbedding,
     apply_rotary_emb
@@ -586,6 +588,24 @@ class PiZero(Module):
         weights: dict[str, Tensor]
     ):
         raise NotImplementedError
+
+    def create_ema(
+        self,
+        beta = 0.99,
+        **ema_kwargs
+    ) -> EMA:
+
+        ema_pi_zero = EMA(
+            self,
+            beta = beta,
+            include_online_model = False,
+            forward_method_names = (
+                'sample_actions',
+            ),
+            **ema_kwargs
+        )
+
+        return ema_pi_zero
 
     @torch.inference_mode()
     def sample_actions(
