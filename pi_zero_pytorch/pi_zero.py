@@ -449,13 +449,14 @@ class PiZero(Module):
         depth = 12,
         dim_head = 64,
         heads = 8,
-        dim_internal_state: int | None = None,
         use_flex_attn = False,
         ff_expand_factor = 4.,
         attn_softclamp_value = 50.,
         final_norm_softclamp_value = 30.,
         vit: Module | None = None,
         vit_dim = None,
+        external_state_encoders: Module | list[Module] | None = None,
+        dim_internal_state: int | None = None,
         num_action_register_tokens = 4,
         attn_kwargs: dict = dict(),
         ff_kwargs: dict = dict(),
@@ -497,6 +498,11 @@ class PiZero(Module):
 
         self.dim_internal_state = default(dim_internal_state, dim)
         self.to_internal_state_tokens = nn.Linear(dim_internal_state, dim) if exists(dim_internal_state) else nn.Identity()
+
+        # additional external states
+
+        external_state_encoders = default(external_state_encoders, [])
+        self.external_state_encoders = ModuleList(external_state_encoders)
 
         # actions
 
@@ -741,6 +747,7 @@ class PiZero(Module):
         times: Float['b'] = None,
         reward_tokens: Float['b d'] | None = None,
         internal_state_tokens: Float['b ns d'] | None = None,
+        external_states: tuple[Float['b ...']] | None = None,
         return_actions_flow = False,
         return_state_keys_values = False,
         cached_state_keys_values: list[tuple[Tensor, Tensor]] | None = None,
@@ -837,9 +844,19 @@ class PiZero(Module):
 
             internal_state_tokens = self.to_internal_state_tokens(internal_state_tokens)
 
+            # additional external states
+
+            if exists(external_states):
+                external_state_tokens = [encode(external_state) for encode, external_state in zip(self.external_state_encoders, external_states)]
+                external_state_tokens = pack(external_state_tokens, 'b * d')
+
+            else:
+                external_state_tokens = visual_tokens.new_empty((batch, 0, self.dim))
+
             # concat visual rep with language
 
             state_tokens, inverse_packed_states = pack_with_inverse([
+                external_state_tokens,
                 visual_tokens,
                 language_tokens,
                 joint_state_tokens,
@@ -964,7 +981,7 @@ class PiZero(Module):
         if not inferencing:
             # unpack and unembed to predictions
 
-            visual_tokens, tokens, *_ = inverse_packed_states(state_tokens, 'b * d')
+            _, visual_tokens, tokens, *_ = inverse_packed_states(state_tokens, 'b * d')
 
             # gemma uses a final softclamp before norm
 
