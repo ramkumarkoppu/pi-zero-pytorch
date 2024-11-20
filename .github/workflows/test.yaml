@@ -1,5 +1,5 @@
-name: Tests the examples in README
-on: push
+name: tests
+on: [push, pull_request]
 
 env:
   TYPECHECK: True
