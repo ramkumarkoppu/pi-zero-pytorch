@@ -43,7 +43,7 @@ sampled_actions = model(vision, commands, joint_state, trajectory_length = 32) #
 At the project root, run
 
 ```bash
-$ pip install . # or `uv pip install .`
+$ pip install '.[test]' # or `uv pip install '.[test]'`
 ```
 
 Then add your tests to `tests/test_pi_zero.py` and run
