@@ -6,13 +6,13 @@ Implementation of <a href="https://www.physicalintelligence.company/blog/pi0">π
 
 Summary of this work would be that it is a simplified <a href="https://github.com/lucidrains/transfusion-pytorch">Transfusion</a> (Zhou et al.) with influence from <a href="https://arxiv.org/abs/2403.03206">Stable Diffusion 3</a> (Esser et al.), mainly the adoption of flow matching instead of diffusion for policy generation, as well as the separation of parameters (<a href="https://github.com/lucidrains/mmdit/blob/main/mmdit/mmdit_pytorch.py#L43">Joint Attention</a> from mmDIT). They build on top of a pretrained vision language model in the PaLI configuration with prefixed visual tokens from a ViT to Gemma 2B
 
-## Install
+### Install
 
 ```bash
 $ pip install pi-zero-pytorch
 ```
 
-## Usage
+### Usage
 
 ```python
 import torch
@@ -38,7 +38,7 @@ loss.backward()
 sampled_actions = model(vision, commands, joint_state, trajectory_length = 32) # (1, 32, 6)
 ```
 
-## Contributing
+### Contributing
 
 At the project root, run
 
@@ -54,7 +54,7 @@ $ pytest tests/
 
 That's it
 
-## Citation
+### Citation
 
 ```bibtex
 @misc{Black2024,
