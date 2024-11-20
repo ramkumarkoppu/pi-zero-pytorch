@@ -38,6 +38,22 @@ loss.backward()
 sampled_actions = model(vision, commands, joint_state, trajectory_length = 32) # (1, 32, 6)
 ```
 
+## Contributing
+
+At the project root, run
+
+```bash
+$ pip install . # or `uv pip install .`
+```
+
+Then add your tests to `tests/test_pi_zero.py` and run
+
+```bash
+$ pytest tests/
+```
+
+That's it
+
 ## Citation
 
 ```bibtex
