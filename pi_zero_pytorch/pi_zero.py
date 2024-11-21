@@ -591,23 +591,63 @@ class PiZero(Module):
     @beartype
     def load_pretrained_vlm_weights_(
         self,
-        weights: dict[str, torch.Tensor]
+        weights: dict[str, torch.Tensor],
+        strict: bool = False
     ):
         """
         Load pretrained weights from a Vision-Language Model (VLM) into PiZero.
-        
+
         Args:
             weights (dict[str, torch.Tensor]): The state dictionary of the VLM model.
+            strict (bool): Whether to strictly enforce matching all weights.
+                        If False, unmatched weights will be skipped.
         """
         pi_zero_state_dict = self.state_dict()
+        missing_keys, mismatched_keys = [], []
 
-        for name, param in weights.items():
-            if name in pi_zero_state_dict and param.size() == pi_zero_state_dict[name].size():
-                pi_zero_state_dict[name].data.copy_(param.data)
+        # Map VLM weights to PiZero model keys
+        weight_mapping = {
+            # Example mappings (add more as needed based on your models)
+            "language_model.model.embed_tokens.weight": "token_emb.weight",
+            "language_model.model.layers.0.self_attn.q_proj.weight": "layers.0.0.to_qkv.weight",
+            "language_model.model.layers.0.self_attn.k_proj.weight": "layers.0.0.to_qkv.weight",
+            "language_model.model.layers.0.self_attn.v_proj.weight": "layers.0.0.to_qkv.weight",
+            "language_model.model.layers.0.self_attn.o_proj.weight": "layers.0.0.to_out.weight",
+            "language_model.model.layers.0.mlp.gate_proj.weight": "layers.0.1.proj_in.weight",
+            "language_model.model.layers.0.mlp.down_proj.weight": "layers.0.1.proj_out.weight",
+            "language_model.model.layers.0.mlp.up_proj.weight": "layers.0.2.proj_out.weight",
+            "language_model.model.norm.weight": "final_norm.weight",
+            # Add mappings for other layers...
+        }
+
+        # Iterate over the weight mapping
+        for vlm_key, pi_zero_key in weight_mapping.items():
+            if vlm_key in weights:
+                if pi_zero_key in pi_zero_state_dict:
+                    if weights[vlm_key].size() == pi_zero_state_dict[pi_zero_key].size():
+                        print(f"Loading {vlm_key} into {pi_zero_key}")
+                        pi_zero_state_dict[pi_zero_key].data.copy_(weights[vlm_key])
+                    else:
+                        print(f"Size mismatch: {vlm_key} -> {pi_zero_key}")
+                        mismatched_keys.append((vlm_key, pi_zero_key))
+                else:
+                    print(f"Skipping {vlm_key}: Target key {pi_zero_key} not found")
+                    missing_keys.append((vlm_key, pi_zero_key))
             else:
-                print(f"Skipping {name}: Size mismatch or not in PiZero model.")
+                print(f"Skipping {pi_zero_key}: Source key {vlm_key} not found")
+                missing_keys.append((vlm_key, pi_zero_key))
 
-        self.load_state_dict(pi_zero_state_dict)
+        # Load updated state_dict into the PiZero model
+        self.load_state_dict(pi_zero_state_dict, strict=strict)
+
+        # Log missing and mismatched keys
+        if missing_keys:
+            print(f"Missing keys ({len(missing_keys)}): {missing_keys}")
+        if mismatched_keys:
+            print(f"Mismatched keys ({len(mismatched_keys)}): {mismatched_keys}")
+
+        if not strict:
+            print("Note: Model loaded in non-strict mode. Missing/mismatched weights ignored.")
 
     def create_ema(
         self,
