@@ -182,6 +182,7 @@ class Attention(Module):
         heads = 8,
         dropout = 0.,
         softclamp_value = 50.,
+        learned_value_action_residual_mix = False,
         rotary_emb: RotaryEmbedding | None = None
     ):
         super().__init__()
@@ -199,6 +200,13 @@ class Attention(Module):
         self.to_out = LinearNoBias(dim_inner, dim)
 
         self.to_actions_qkvg = LinearNoBias(dim, 4 * dim_inner)
+
+        self.to_action_value_residual_mix = nn.Sequential(
+            LinearNoBias(dim, heads),
+            nn.Sigmoid(),
+            Rearrange('b n h -> b h n 1')
+        ) if learned_value_action_residual_mix else (lambda _: 0.5)
+
         self.to_actions_out = LinearNoBias(dim_inner, dim)
 
         self.softclamp_value = softclamp_value
@@ -288,7 +296,8 @@ class Attention(Module):
         mq, mk, mv, aq, ak, av, ag = tuple(self.split_heads(t) for t in (mq, mk, mv, aq, ak, av, ag))
 
         if exists(actions_value_residual):
-            av = 0.5 * (av + actions_value_residual)
+            mix = self.to_action_value_residual_mix(actions)
+            av = av * mix + actions_value_residual * (1. - mix)
 
         q, k, v = tuple(torch.cat(tensors, dim = -2) for tensors in zip((mq, mk, mv), (aq, ak, av)))
 
@@ -316,7 +325,7 @@ class Attention(Module):
             if exists(mask):
                 causal_mask = einx.logical_or('b j, i j -> b 1 i j', ~mask, causal_mask)
 
-            causal_mask[..., seq_len:] = False  # actions have bidirectional attention, lining up with Transfusion paper
+            causal_mask[..., seq_len:, seq_len:] = False  # actions have bidirectional attention, lining up with Transfusion paper
 
             sim = sim.masked_fill(causal_mask, max_neg_value(sim))
 
@@ -530,9 +539,11 @@ class PiZero(Module):
         layers = []
         cond_layers = []
 
-        for _ in range(depth):
+        for i in range(depth):
+            is_first_block = i == 0
+
             layers.append(ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, **attn_kwargs),
+                Attention(dim = dim, dim_head = dim_head, heads = heads, learned_value_action_residual_mix = not is_first_block, **attn_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
             ]))
