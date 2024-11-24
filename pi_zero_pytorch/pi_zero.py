@@ -226,7 +226,8 @@ class Attention(Module):
         aq, ak, av, ag = tuple(self.split_heads(t) for t in (aq, ak, av, ag))
 
         if exists(actions_value_residual):
-            av = 0.5 * (av + actions_value_residual)
+            mix = self.to_action_value_residual_mix(actions)
+            av = av * mix + actions_value_residual * (1. - mix)
 
         q = aq
         mk, mv = cached_state_keys_values
