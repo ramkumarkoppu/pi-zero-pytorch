@@ -823,7 +823,7 @@ class PiZero(Module):
         token_ids: Int['b nt'],                                          # language
     ) -> Float['b n d']:
 
-        batch, device = token_ids.shape[0], token_ids.device
+        device = token_ids.device
 
         language_tokens = self.token_emb(token_ids)
 
