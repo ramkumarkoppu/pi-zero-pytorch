@@ -1,7 +1,12 @@
+import pytest
+
 import torch
 from pi_zero_pytorch import π0
 
-def test_pi_zero_with_vit():
+@pytest.mark.parametrize('only_vlm', (True, False))
+def test_pi_zero_with_vit(
+    only_vlm: bool
+):
     from vit_pytorch import ViT
     from vit_pytorch.extractor import Extractor
 
@@ -28,11 +33,14 @@ def test_pi_zero_with_vit():
         num_tokens = 20_000
     )
 
-    vision = torch.randn(2, 1024, 512)
-
     images = torch.randn(2, 3, 2, 256, 256)
-
     commands = torch.randint(0, 20_000, (2, 1024))
+
+    if only_vlm:
+        vlm_logits = model.forward_only_vision_language(images, commands)
+        assert vlm_logits.ndim == 3
+        return
+
     joint_state = torch.randn(2, 12)
     actions = torch.randn(2, 32, 6)
 
