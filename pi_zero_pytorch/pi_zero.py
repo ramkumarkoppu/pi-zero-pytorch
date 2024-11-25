@@ -293,6 +293,48 @@ class Attention(Module):
 
         return actions_out, (mk, mv, ak, av)
 
+    def forward_only_vision_language(
+        self,
+        state: Float['b n d'],
+        rotary_emb = None
+    ) -> Float['b n d']:
+
+        device = state.device
+
+        q, k, v = self.to_qkv(state).chunk(3, dim = -1)
+
+        q, k, v = tuple(self.split_heads(t) for t in (q, k, v))
+
+        if exists(rotary_emb):
+            q = apply_rotary_emb(rotary_emb, q)
+            k = apply_rotary_emb(rotary_emb, k)
+
+        elif exists(self.rotary_emb):
+            q = self.rotary_emb.rotate_queries_or_keys(q)
+            k = self.rotary_emb.rotate_queries_or_keys(k)
+
+        # attention
+
+        q = q * self.scale
+
+        sim = einsum(q, k, 'b h i d, b h j d -> b h i j')
+
+        sim = softclamp(sim, self.softclamp_value)
+
+        causal_mask = torch.ones(sim.shape[-2:], dtype = torch.bool, device = device).triu(1)
+
+        sim = sim.masked_fill(causal_mask, max_neg_value(sim))
+
+        attn = sim.softmax(dim = -1)
+
+        out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
+
+        # merge attention heads
+
+        out = self.merge_heads(out)
+
+        return self.to_out(out)
+
     def forward(
         self,
         multimodal_seq,
@@ -774,6 +816,71 @@ class PiZero(Module):
         flow_with_reward_cfg = action_flow_with_reward + cond_scale * update
 
         return flow_with_reward_cfg, (with_reward_cache_kv, without_reward_cache_kv)
+
+    def forward_only_vision_language(
+        self,
+        images: Float['b nv d'] | Float['b c h w'] | Float['b c f h w'], # vision
+        token_ids: Int['b nt'],                                          # language
+    ) -> Float['b n d']:
+
+        batch, device = token_ids.shape[0], token_ids.device
+
+        language_tokens = self.token_emb(token_ids)
+
+        # vision
+
+        if exists(self.vit):
+            assert images.ndim in {4, 5}
+            is_multiple_images = images.ndim == 5
+
+            if is_multiple_images:
+                images = rearrange(images, 'b c f h w -> b f c h w')
+                images, inverse_pack_image_frames = pack_with_inverse([images], '* c h w')
+
+            with torch.no_grad():
+                self.vit.eval()
+                visual_tokens = self.vit(images)
+
+            if is_multiple_images:
+                visual_tokens, = inverse_pack_image_frames(visual_tokens, '* n d')
+                visual_tokens = rearrange(visual_tokens, 'b f n d -> b (f n) d')
+
+        else:
+            assert images.ndim == 3, 'images must be already encoded as (batch, seq, feature dimension)'
+            visual_tokens = images
+
+        visual_tokens = self.maybe_to_image_tokens(visual_tokens)
+
+        # concat visual rep with language
+
+        state_tokens, _ = pack_with_inverse([
+            visual_tokens,
+            language_tokens,
+        ], 'b * d')
+
+        # rotary embeddings
+
+        seq_len = state_tokens.shape[-2]
+
+        seq = torch.arange(seq_len, device = device)
+
+        rotary_emb = self.rotary_emb(seq)
+
+        # transformer
+
+        for attn, ff, _ in self.layers:
+
+            state_attn_out = attn.forward_only_vision_language(state_tokens, rotary_emb = rotary_emb)
+
+            state_tokens = state_tokens + state_attn_out
+
+            state_tokens = ff(state_tokens) + state_tokens
+
+        embed = self.final_norm_softclamp(state_tokens)
+
+        logits = self.state_to_logits(embed)
+
+        return logits
 
     def forward(
         self,
