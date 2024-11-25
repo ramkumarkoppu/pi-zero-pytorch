@@ -101,4 +101,24 @@ That's it
 }
 ```
 
+```bibtex
+@article{Bulatov2022RecurrentMT,
+    title   = {Recurrent Memory Transformer},
+    author  = {Aydar Bulatov and Yuri Kuratov and Mikhail S. Burtsev},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2207.06881},
+    url     = {https://api.semanticscholar.org/CorpusID:250526424}
+}
+```
+
+```bibtex
+@inproceedings{Bessonov2023RecurrentAT,
+    title   = {Recurrent Action Transformer with Memory},
+    author  = {A. B. Bessonov and Alexey Staroverov and Huzhenyu Zhang and Alexey K. Kovalev and D. Yudin and Aleksandr I. Panov},
+    year    = {2023},
+    url     = {https://api.semanticscholar.org/CorpusID:259188030}
+}
+```
+
 [*dear alice*](https://www.youtube.com/watch?v=z-Ng5ZvrDm4)

@@ -201,6 +201,7 @@ class Attention(Module):
         heads = 8,
         dropout = 0.,
         softclamp_value = 50.,
+        recurrent_memory_params = False,
         learned_value_action_residual_mix = False,
         rotary_emb: RotaryEmbedding | None = None
     ):
@@ -215,8 +216,12 @@ class Attention(Module):
 
         self.rmsnorm = nn.RMSNorm(dim)
 
+        # state parameters
+
         self.to_qkv = LinearNoBias(dim, 3 * dim_inner)
         self.to_out = LinearNoBias(dim_inner, dim)
+
+        # action parameters
 
         self.to_actions_qkvg = LinearNoBias(dim, 4 * dim_inner)
 
@@ -229,6 +234,16 @@ class Attention(Module):
         self.to_actions_out = LinearNoBias(dim_inner, dim)
 
         self.softclamp_value = softclamp_value
+
+        # maybe recurrent memory parameters
+
+        self.accepts_recurrent_memories = recurrent_memory_params
+
+        if not recurrent_memory_params:
+            return
+
+        self.to_memories_qkv = LinearNoBias(dim, 3 * dim_inner)
+        self.to_memories_out = LinearNoBias(dim_inner, dim)
 
     def forward_actions_with_cached_state(
         self,
@@ -542,6 +557,7 @@ class PiZero(Module):
         flow_loss_weight = 1.,
         immiscible_flow = False, # https://arxiv.org/abs/2406.12303
         reward_tokens_dropout_prob = 0.,
+        recurrent_memories = False,
         odeint_kwargs: dict = dict(
             atol = 1e-5,
             rtol = 1e-5,
@@ -611,7 +627,7 @@ class PiZero(Module):
             is_first_block = i == 0
 
             layers.append(ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, learned_value_action_residual_mix = not is_first_block, **attn_kwargs),
+                Attention(dim = dim, dim_head = dim_head, heads = heads, recurrent_memory_params = recurrent_memories, learned_value_action_residual_mix = not is_first_block, **attn_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
             ]))
