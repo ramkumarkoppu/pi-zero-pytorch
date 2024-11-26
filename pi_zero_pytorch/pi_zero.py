@@ -911,6 +911,8 @@ class PiZero(Module):
         return_actions_flow = False,
         return_state_keys_values = False,
         cached_state_keys_values: list[tuple[Tensor, Tensor]] | None = None,
+        return_language_loss = True,
+        return_action_flow_loss = True,
         **kwargs
     ):
         inferencing = exists(cached_state_keys_values)
@@ -1174,6 +1176,10 @@ class PiZero(Module):
 
         actions = self.final_actions_norm(action_tokens)
 
+        # validate loss being returned
+
+        assert return_language_loss or return_action_flow_loss
+
         # flow loss for actions tokens
 
         pred_actions_flow = self.actions_to_pred_flow(actions)
@@ -1184,19 +1190,25 @@ class PiZero(Module):
 
             return pred_actions_flow, state_cached_keys_values
 
-        flow_loss = F.mse_loss(flow, pred_actions_flow)
+        flow_loss = self.zero
+
+        if return_action_flow_loss:
+            flow_loss = F.mse_loss(flow, pred_actions_flow)
         
         # language cross entropy loss
 
-        tokens = self.final_norm(tokens)
+        language_loss = self.zero
 
-        language_logits = self.state_to_logits(tokens)
+        if return_language_loss:
+            tokens = self.final_norm(tokens)
 
-        language_loss = F.cross_entropy(
-            rearrange(language_logits[:, :-1], 'b n l -> b l n'),
-            labels,
-            ignore_index = self.lm_pad_id
-        )
+            language_logits = self.state_to_logits(tokens)
+
+            language_loss = F.cross_entropy(
+                rearrange(language_logits[:, :-1], 'b n l -> b l n'),
+                labels,
+                ignore_index = self.lm_pad_id
+            )
 
         # loss breakdown
 
