@@ -40,8 +40,7 @@ import tqdm
 # nt - seq of text tokens
 # nv - seq of visual tokens
 # ns - seq of additional internal state tokens
-# nmp - seq of past memory tokens (reading from)
-# nmf - seq of future memory tokens (writing to)
+# nm - seq of memory tokens
 # d - dimension
 # da - action dimension
 # djs - joint state dimension
@@ -203,7 +202,7 @@ class Attention(Module):
         heads = 8,
         dropout = 0.,
         softclamp_value = 50.,
-        recurrent_memory_params = False,
+        num_recurrent_memory_tokens = 0,
         learned_value_action_residual_mix = False,
         rotary_emb: RotaryEmbedding | None = None
     ):
@@ -239,9 +238,11 @@ class Attention(Module):
 
         # maybe recurrent memory parameters
 
-        self.accepts_recurrent_memories = recurrent_memory_params
+        has_recurrent_memories = num_recurrent_memory_tokens > 0
+        self.accepts_recurrent_memories = has_recurrent_memories
+        self.num_mem = num_recurrent_memory_tokens
 
-        if not recurrent_memory_params:
+        if not has_recurrent_memories:
             return
 
         self.to_memories_qkv = LinearNoBias(dim, 3 * dim_inner)
@@ -303,7 +304,7 @@ class Attention(Module):
 
         out = self.merge_heads(out)
 
-q        actions_out = self.to_actions_out(out)
+        actions_out = self.to_actions_out(out)
 
         if not return_keys_values:
             return actions_out
@@ -559,7 +560,7 @@ class PiZero(Module):
         flow_loss_weight = 1.,
         immiscible_flow = False, # https://arxiv.org/abs/2406.12303
         reward_tokens_dropout_prob = 0.,
-        recurrent_memories = False,
+        num_recurrent_memory_tokens = 0,
         odeint_kwargs: dict = dict(
             atol = 1e-5,
             rtol = 1e-5,
@@ -620,6 +621,13 @@ class PiZero(Module):
 
         self.rotary_emb = RotaryEmbedding(dim_head)
 
+        # recurrent memory parameters and logic
+
+        self.has_recurrent_memories = num_recurrent_memory_tokens > 0
+
+        self.memory_tokens = nn.Parameter(torch.zeros(num_recurrent_memory_tokens, dim))
+        nn.init.normal_(self.memory_tokens, std = 0.02)
+
         # attention and feedforward
 
         layers = []
@@ -629,7 +637,7 @@ class PiZero(Module):
             is_first_block = i == 0
 
             layers.append(ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, recurrent_memory_params = recurrent_memories, learned_value_action_residual_mix = not is_first_block, **attn_kwargs),
+                Attention(dim = dim, dim_head = dim_head, heads = heads, num_recurrent_memory_tokens = num_recurrent_memory_tokens, learned_value_action_residual_mix = not is_first_block, **attn_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
             ]))
@@ -676,6 +684,10 @@ class PiZero(Module):
         self.odeint_fn = partial(odeint, **odeint_kwargs)
 
         self.register_buffer('zero', torch.tensor(0.), persistent = False)
+
+        # tensor typing
+
+        self._nm = num_recurrent_memory_tokens
 
     @property
     def can_cfg(self):
@@ -910,7 +922,7 @@ class PiZero(Module):
         reward_tokens: Float['b d'] | None = None,
         internal_state_tokens: Float['b ns d'] | None = None,
         external_states: tuple[Float['b ...']] | None = None,
-        recurrent_memory_tokens: Float['b nmp d'] | None = None,
+        past_recurrent_memory_tokens: Float['b {self._nm} d'] | None = None,
         return_actions_flow = False,
         return_state_keys_values = False,
         cached_state_keys_values: list[tuple[Tensor, Tensor]] | None = None,
@@ -953,9 +965,20 @@ class PiZero(Module):
         time_cond = self.to_time_cond(times)
         action_tokens = self.to_action_tokens(actions)
 
+        # register tokens
+
         action_register_tokens = repeat(self.action_register_tokens, '... -> b ...', b = batch)
 
-        action_tokens, inverse_pack_action_registers = pack_with_inverse([action_register_tokens, action_tokens], 'b * d')
+        # take care of maybe recurrent memory tokens
+
+        if self.has_recurrent_memories:
+            memory_tokens = repeat(self.memory_tokens, 'nm d -> b nm d', b = batch)
+        else:
+            memory_tokens = actions.new_empty((batch, 0, self.dim))
+
+        # pack into [action registers] [actions] [memory tokens (write)]
+
+        action_tokens, inverse_pack_action_registers = pack_with_inverse([action_register_tokens, action_tokens, memory_tokens], 'b * d')
 
         action_with_registers_length = action_tokens.shape[-2]
 
@@ -1024,8 +1047,8 @@ class PiZero(Module):
 
             # take care of previous memory tokens
 
-            if not exists(recurrent_memory_tokens):
-                recurrent_memory_tokens = visual_tokens.new_empty((batch, 0, self.dim))
+            if not exists(past_recurrent_memory_tokens):
+                past_recurrent_memory_tokens = visual_tokens.new_empty((batch, 0, self.dim))
 
             # allow joint and internal states to have bidirectional attention
 
@@ -1045,7 +1068,7 @@ class PiZero(Module):
             # concat visual rep with language
 
             state_tokens, inverse_packed_states = pack_with_inverse([
-                recurrent_memory_tokens,
+                past_recurrent_memory_tokens,
                 external_state_tokens,
                 visual_tokens,
                 language_tokens,
@@ -1177,7 +1200,7 @@ class PiZero(Module):
 
             tokens = self.final_norm_softclamp(tokens)
 
-        action_register_tokens, action_tokens = inverse_pack_action_registers(action_tokens)
+        action_register_tokens, action_tokens, written_memory_tokens = inverse_pack_action_registers(action_tokens)
 
         action_tokens = self.final_norm_softclamp(action_tokens)
 
