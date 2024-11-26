@@ -40,6 +40,8 @@ import tqdm
 # nt - seq of text tokens
 # nv - seq of visual tokens
 # ns - seq of additional internal state tokens
+# nmp - seq of past memory tokens (reading from)
+# nmf - seq of future memory tokens (writing to)
 # d - dimension
 # da - action dimension
 # djs - joint state dimension
@@ -301,7 +303,7 @@ class Attention(Module):
 
         out = self.merge_heads(out)
 
-        actions_out = self.to_actions_out(out)
+q        actions_out = self.to_actions_out(out)
 
         if not return_keys_values:
             return actions_out
@@ -908,6 +910,7 @@ class PiZero(Module):
         reward_tokens: Float['b d'] | None = None,
         internal_state_tokens: Float['b ns d'] | None = None,
         external_states: tuple[Float['b ...']] | None = None,
+        recurrent_memory_tokens: Float['b nmp d'] | None = None,
         return_actions_flow = False,
         return_state_keys_values = False,
         cached_state_keys_values: list[tuple[Tensor, Tensor]] | None = None,
@@ -1019,6 +1022,11 @@ class PiZero(Module):
             else:
                 external_state_tokens = visual_tokens.new_empty((batch, 0, self.dim))
 
+            # take care of previous memory tokens
+
+            if not exists(recurrent_memory_tokens):
+                recurrent_memory_tokens = visual_tokens.new_empty((batch, 0, self.dim))
+
             # allow joint and internal states to have bidirectional attention
 
             internal_state_len = joint_state_tokens.shape[-2] + internal_state_tokens.shape[-2]
@@ -1037,6 +1045,7 @@ class PiZero(Module):
             # concat visual rep with language
 
             state_tokens, inverse_packed_states = pack_with_inverse([
+                recurrent_memory_tokens,
                 external_state_tokens,
                 visual_tokens,
                 language_tokens,
@@ -1162,7 +1171,7 @@ class PiZero(Module):
         if not inferencing:
             # unpack and unembed to predictions
 
-            _, visual_tokens, tokens, *_ = inverse_packed_states(state_tokens, 'b * d')
+            _, _, visual_tokens, tokens, *_ = inverse_packed_states(state_tokens, 'b * d')
 
             # gemma uses a final softclamp before norm
 
