@@ -1164,7 +1164,7 @@ class PiZero(Module):
 
                 action_tokens = actions_ff(action_tokens) + action_tokens
 
-                action_tokens = ff_ada_rmsnorm(action_tokens, time_cond)
+                action_tokens = ff_ada_layerscale(action_tokens, time_cond)
 
         else:
 
@@ -1189,7 +1189,7 @@ class PiZero(Module):
 
                 action_tokens = actions_ff(action_tokens) + action_tokens
 
-                action_tokens = ff_ada_rmsnorm(action_tokens, time_cond)
+                action_tokens = ff_ada_layerscale(action_tokens, time_cond)
 
         if not inferencing:
             # unpack and unembed to predictions
