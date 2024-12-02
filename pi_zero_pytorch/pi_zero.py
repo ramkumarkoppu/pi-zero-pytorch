@@ -52,8 +52,9 @@ import tqdm
 # token layout for transformer
 # vision and language tokens are autoregressive causal mask, actions, interal states + joint bidirectional amongst own tokens, but still autoregressive with respect to other tokens
 
-# [state token groups] [action token groups]
-# [external state] [visual tokens] [language tokens] [joint state + internal state] [maybe reward / condition token] [action registers] [actions]
+# [state token groups] [action token groups] -> [autoregressive masking] [bidirectional]
+
+# [external state] [visual tokens] [language tokens] [maybe reward / condition token] [action registers] [joint state + internal state] [actions]
 
 # constants
 
