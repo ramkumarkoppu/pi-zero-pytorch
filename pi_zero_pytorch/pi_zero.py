@@ -196,7 +196,6 @@ class Attention(Module):
         heads = 8,
         dropout = 0.,
         softclamp_value = 50.,
-        laser = False,
         num_recurrent_memory_tokens = 0,
         learned_value_action_residual_mix = False,
         rotary_emb: RotaryEmbedding | None = None
@@ -211,10 +210,6 @@ class Attention(Module):
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
 
         self.rmsnorm = nn.RMSNorm(dim)
-
-        # laser attention
-
-        self.laser = laser
 
         # state parameters
 
@@ -277,12 +272,6 @@ class Attention(Module):
         elif exists(self.rotary_emb):
             q, k = self.rotary_emb.rotate_queries_with_cached_keys(q, k)
 
-        # maybe laser
-
-        if self.laser:
-            v_max = v.amax(dim = -2, keepdim = True).detach()
-            v = (v - v_max).exp()
-
         # attention
 
         if exists(flex_attn_fn):
@@ -300,11 +289,6 @@ class Attention(Module):
             attn = sim.softmax(dim = -1)
 
             out = einsum(attn, v, 'b h i j, b h j d -> b h i d')
-
-        # maybe laser
-
-        if self.laser:
-            out = log(out) + v_max
 
         # gate
 
@@ -551,7 +535,6 @@ class PiZero(Module):
         use_flex_attn = False,
         ff_expand_factor = 4.,
         attn_softclamp_value = 50.,
-        attn_laser = False,
         final_norm_softclamp_value = 30.,
         vit: Module | None = None,
         vit_dim = None,
@@ -642,7 +625,7 @@ class PiZero(Module):
             is_first_block = i == 0
 
             layers.append(ModuleList([
-                Attention(dim = dim, dim_head = dim_head, heads = heads, num_recurrent_memory_tokens = num_recurrent_memory_tokens, learned_value_action_residual_mix = not is_first_block, laser = attn_laser, **attn_kwargs),
+                Attention(dim = dim, dim_head = dim_head, heads = heads, num_recurrent_memory_tokens = num_recurrent_memory_tokens, learned_value_action_residual_mix = not is_first_block, **attn_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
             ]))
