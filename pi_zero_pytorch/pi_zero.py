@@ -1065,7 +1065,7 @@ class PiZero(Module):
         else:
             state_length = state_tokens.shape[-2]
 
-        mask = F.pad(language_mask, (state_length - command_length - 1, 1 + action_with_registers_length), value = True) # assume fixed number of images for now, but address variable length modality states later
+        mask = F.pad(language_mask, (state_length - command_length, action_with_registers_length), value = True) # assume fixed number of images for now, but address variable length modality states later
 
         # rotary embeddings
 
