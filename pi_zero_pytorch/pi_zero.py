@@ -910,6 +910,7 @@ class PiZero(Module):
         reward_tokens: Float['b d'] | None = None,
         internal_state_tokens: Float['b ns d'] | None = None,
         external_states: tuple[Float['b ...']] | None = None,
+        record_and_return_memory_tokens = False,
         past_recurrent_memory_tokens: Float['b {self._nm} d'] | None = None,
         return_actions_flow = False,
         return_state_keys_values = False,
@@ -1038,6 +1039,9 @@ class PiZero(Module):
                 external_state_tokens = visual_tokens.new_empty((batch, 0, self.dim))
 
             # take care of previous memory tokens
+
+            assert self.has_recurrent_memories or not exists(past_recurrent_memory_tokens), 'you are asking for memories to be read, but `num_recurrent_memory_tokens` is 0'
+            assert self.has_recurrent_memories or not record_and_return_memory_tokens, 'you are asking for memories to be written, but `num_recurrent_memory_tokens` is 0'
 
             if not exists(past_recurrent_memory_tokens):
                 past_recurrent_memory_tokens = visual_tokens.new_empty((batch, 0, self.dim))
@@ -1187,8 +1191,12 @@ class PiZero(Module):
         pred_actions_flow = self.actions_to_pred_flow(actions)
 
         if return_actions_flow:
-            if not return_state_keys_values:
+
+            if not return_state_keys_values and not record_and_return_memory_tokens:
                 return pred_actions_flow
+
+            if not return_state_keys_values:
+                return pred_actions_flow, written_memory_tokens
 
             return pred_actions_flow, state_cached_keys_values
 
@@ -1223,7 +1231,10 @@ class PiZero(Module):
             flow_loss * self.flow_loss_weight
         )
 
-        return total_loss, loss_breakdown
+        if not record_and_return_memory_tokens:
+            return total_loss, loss_breakdown
+
+        return total_loss, loss_breakdown, written_memory_tokens
 
 # fun
 
