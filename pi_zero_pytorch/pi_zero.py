@@ -966,6 +966,9 @@ class PiZero(Module):
 
         # take care of maybe recurrent memory tokens
 
+        assert self.has_recurrent_memories or not exists(past_recurrent_memory_tokens), 'you are asking for memories to be read, but `num_recurrent_memory_tokens` is 0'
+        assert self.has_recurrent_memories or not record_and_return_memory_tokens, 'you are asking for memories to be written, but `num_recurrent_memory_tokens` is 0'
+
         if not exists(past_recurrent_memory_tokens):
             past_recurrent_memory_tokens = actions.new_empty((batch, 0, self.dim))
 
@@ -1049,11 +1052,6 @@ class PiZero(Module):
 
             else:
                 external_state_tokens = visual_tokens.new_empty((batch, 0, self.dim))
-
-            # take care of previous memory tokens
-
-            assert self.has_recurrent_memories or not exists(past_recurrent_memory_tokens), 'you are asking for memories to be read, but `num_recurrent_memory_tokens` is 0'
-            assert self.has_recurrent_memories or not record_and_return_memory_tokens, 'you are asking for memories to be written, but `num_recurrent_memory_tokens` is 0'
 
             # concat visual rep with language
 
@@ -1158,11 +1156,13 @@ class PiZero(Module):
 
                 action_tokens = ff_ada_layerscale(action_tokens, time_cond)
 
-                memory_tokens, unpack_memory = pack_with_inverse(memory_tokens, 'b * d')
+                if self.has_recurrent_memories:
+                    memory_tokens, unpack_memory = pack_with_inverse(memory_tokens, 'b * d')
 
-                memory_tokens = memories_ff(memory_tokens) + memory_tokens
+                    memory_tokens = memories_ff(memory_tokens) + memory_tokens
 
-                memory_tokens = unpack_memory(memory_tokens)
+                    memory_tokens = unpack_memory(memory_tokens)
+
         else:
 
             for (
@@ -1192,11 +1192,12 @@ class PiZero(Module):
 
                 action_tokens = ff_ada_layerscale(action_tokens, time_cond)
 
-                memory_tokens, unpack_memory = pack_with_inverse(memory_tokens, 'b * d')
+                if self.has_recurrent_memories:
+                    memory_tokens, unpack_memory = pack_with_inverse(memory_tokens, 'b * d')
 
-                memory_tokens = memories_ff(memory_tokens) + memory_tokens
+                    memory_tokens = memories_ff(memory_tokens) + memory_tokens
 
-                memory_tokens = unpack_memory(memory_tokens)
+                    memory_tokens = unpack_memory(memory_tokens)
 
         if not inferencing:
             # unpack and unembed to predictions
