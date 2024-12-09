@@ -616,6 +616,8 @@ class PiZero(Module):
         self.memory_tokens = nn.Parameter(torch.zeros(num_recurrent_memory_tokens, dim))
         nn.init.normal_(self.memory_tokens, std = 0.02)
 
+        self.final_norm_write_memories = nn.RMSNorm(dim) if self.has_recurrent_memories else None
+
         # attention and feedforward
 
         layers = []
@@ -627,7 +629,7 @@ class PiZero(Module):
             layers.append(ModuleList([
                 Attention(dim = dim, dim_head = dim_head, heads = heads, num_recurrent_memory_tokens = num_recurrent_memory_tokens, learned_value_action_residual_mix = not is_first_block, **attn_kwargs),
                 SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
-                SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs)
+                SwiGLUFeedForward(dim = dim, expand_factor = ff_expand_factor, **ff_kwargs),
             ]))
 
             cond_layers.append(ModuleList([
@@ -1178,7 +1180,12 @@ class PiZero(Module):
 
         action_tokens = self.final_norm_softclamp(action_tokens)
 
-        # projection
+        # writeable memories norm
+
+        if self.has_recurrent_memories:
+            written_memory_tokens = self.final_norm_write_memories(written_memory_tokens)
+
+        # final actions norm
 
         actions = self.final_actions_norm(action_tokens)
 
