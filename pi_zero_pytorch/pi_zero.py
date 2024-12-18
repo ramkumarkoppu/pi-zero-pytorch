@@ -288,7 +288,7 @@ class Attention(Module):
         if exists(memories):
             _, write_memories = memories
             write_memories = self.mem_rmsnorm(write_memories)
-            mqkv_write = self.to_mem_qkv(write_memories)
+            # mqkv_write = self.to_mem_qkv(write_memories)
 
         if exists(rotary_emb):
             q = apply_rotary_emb(rotary_emb, q, freqs_seq_dim = -2)
@@ -1053,7 +1053,7 @@ class PiZero(Module):
 
         memory_tokens = (past_recurrent_memory_tokens, write_memory_tokens)
 
-        mem_length = past_recurrent_memory_tokens.shape[-2] + write_memory_tokens.shape[-2]
+        # mem_length = past_recurrent_memory_tokens.shape[-2] + write_memory_tokens.shape[-2]
 
         # pack into [action registers] [internal + joint states] [actions]
 
