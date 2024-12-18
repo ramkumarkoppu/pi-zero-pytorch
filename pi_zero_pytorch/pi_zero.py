@@ -11,6 +11,8 @@ import torch
 import torch.nn.functional as F
 from torch import pi, nn, tensor, is_tensor
 from torch.nn import Module, ModuleList
+from torch.distributions.beta import Beta
+
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 
 from torchdiffeq import odeint
@@ -179,6 +181,19 @@ def pad_at_dim(
     return F.pad(t, (*zeros, *pad), value = value)
 
 # flow related
+
+def default_sample_times(
+    shape,
+    s = 0.999,
+    alpha = 1.5,
+    beta = 1,
+    device = None
+):
+    """ they propose to sample times from Beta distribution - last part of appendix part B """
+
+    uniform = torch.rand(shape, device = device)
+    sampled = Beta(alpha, beta).sample()
+    return ((s - uniform) / s) * sampled
 
 def noise_assignment(data, noise):
     device = data.device
@@ -589,6 +604,7 @@ class PiZero(Module):
         lm_loss_weight = 1.,
         flow_loss_weight = 1.,
         immiscible_flow = False, # https://arxiv.org/abs/2406.12303
+        sample_times_fn = default_sample_times,
         reward_tokens_dropout_prob = 0.,
         num_recurrent_memory_tokens = 0,
         odeint_kwargs: dict = dict(
@@ -706,6 +722,10 @@ class PiZero(Module):
         # reward classifier free guidance
 
         self.reward_tokens_dropout_prob = reward_tokens_dropout_prob
+
+        # time sampling related
+
+        self.sample_times_fn = default(sample_times_fn, torch.rand)
 
         # loss related
 
@@ -975,7 +995,7 @@ class PiZero(Module):
         # noising the action for flow matching
 
         if not exists(times):
-            times = torch.rand((batch,), device = device)
+            times = self.sample_times_fn((batch,), device = device)
 
         if times.ndim == 0:
             times = repeat(times, '-> b', b = batch)
