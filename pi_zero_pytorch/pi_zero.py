@@ -830,7 +830,7 @@ class PiZero(Module):
 
             pbar.update(1)
 
-            return flow
+            return -flow
 
         # start with random gaussian noise - y0
 
@@ -1012,7 +1012,7 @@ class PiZero(Module):
                 assignment = noise_assignment(actions, noise)
                 noise = noise[assignment]
 
-            flow = actions - noise
+            flow = noise - actions
             padded_times = rearrange(times, 'b -> b 1 1')
 
             actions = noise.lerp(actions, padded_times)
