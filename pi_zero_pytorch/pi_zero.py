@@ -191,9 +191,10 @@ def default_sample_times(
 ):
     """ they propose to sample times from Beta distribution - last part of appendix part B """
 
-    uniform = torch.rand(shape, device = device)
-    sampled = Beta(alpha, beta).sample().to(device)
-    return ((s - uniform) / s).clamp(0., 1.) * sampled
+    alpha = torch.full(shape, alpha, device = device)
+    beta = torch.full(shape, beta, device = device)
+    sampled = Beta(alpha, beta).sample()
+    return (1. - sampled) * s
 
 def noise_assignment(data, noise):
     device = data.device
