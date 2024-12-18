@@ -192,8 +192,8 @@ def default_sample_times(
     """ they propose to sample times from Beta distribution - last part of appendix part B """
 
     uniform = torch.rand(shape, device = device)
-    sampled = Beta(alpha, beta).sample()
-    return ((s - uniform) / s) * sampled
+    sampled = Beta(alpha, beta).sample().to(device)
+    return ((s - uniform) / s).clamp(0., 1.) * sampled
 
 def noise_assignment(data, noise):
     device = data.device
@@ -403,9 +403,11 @@ class Attention(Module):
 
         # handle read, write memories
 
-        assert not (self.accept_memories ^ exists(memories))
+        has_memories = exists(memories) and any([m.numel() > 0 for m in memories])
 
-        if exists(memories):
+        assert not (self.accept_memories ^ has_memories)
+
+        if has_memories:
             memories, unpack_memories = pack_with_inverse(memories, 'b * d')
             memories = self.mem_rmsnorm(memories)
             mqkv = self.to_mem_qkv(memories)
